@@ -30,3 +30,10 @@ Work continues on sensible defaults; each question says which default is in use.
    default, or reachable from the LAN (for a home inference box)?
 9. **Platforms.** The usual three (amd64, arm64, darwin-arm64), plus an Android app later? Default:
    Basecamp only for 0.1.
+10. **Repository and publishing.** The code is local in `~/ai-gateway` on atlas (2 commits). atlas can
+    only push with a per-repo deploy key and can't create repos. Could you (or jimmy-crib/vpavlin)
+    create the GitHub repo and add the atlas deploy key? It's needed for:
+    - the arm64 and darwin CI builds (the always-three-platforms rule);
+    - publishing 0.1.0 to lan03 for testing.
+
+    Default: wait. Nothing is published, and amd64 builds and tests are done locally.
