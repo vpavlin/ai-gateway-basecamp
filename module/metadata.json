@@ -1,0 +1,48 @@
+{
+  "name": "ai_gateway",
+  "display_name": "AI Gateway",
+  "version": "0.1.0",
+  "type": "ui_qml",
+  "category": "productivity",
+  "description": "AI for every Logos app, local or private first. Set up local models (Ollama, llama.cpp, LM Studio) and private or decentralised providers (Venice, NEAR AI, Nillion nilAI, Morpheus, AkashML) with guided onboarding, chat with them, and let other apps ask AI through the ai.ask and ai.chat intents: you see who asks and exactly what is sent, choose the model and its privacy, and the answer goes back to the app. A view over the ai_gateway_core module.",
+  "view": "qml/Main.qml",
+  "icon": "icon.png",
+  "dependencies": [
+    "ai_gateway_core"
+  ],
+  "provides": [
+    {
+      "intent": "ai.ask",
+      "params": [
+        { "name": "prompt", "type": "string", "required": true, "description": "What to do, e.g. \"Summarize this in three bullet points\"" },
+        { "name": "content", "type": "string", "required": false, "description": "The text to work on (up to 64 KB)" },
+        { "name": "system", "type": "string", "required": false, "description": "A system prompt" },
+        { "name": "minPrivacy", "type": "string", "required": false, "description": "The least private tier the app accepts: standard, no-retention, tee, tee-e2ee or local" },
+        { "name": "model", "type": "string", "required": false, "description": "A preferred model (the user decides)" }
+      ]
+    },
+    {
+      "intent": "ai.chat",
+      "params": [
+        { "name": "messages", "type": "array", "required": true, "description": "OpenAI chat messages: [{role, content}]" },
+        { "name": "minPrivacy", "type": "string", "required": false, "description": "The least private tier the app accepts" },
+        { "name": "model", "type": "string", "required": false, "description": "A preferred model (the user decides)" },
+        { "name": "temperature", "type": "number", "required": false },
+        { "name": "maxTokens", "type": "number", "required": false }
+      ]
+    }
+  ],
+  "nix": {
+    "packages": {
+      "build": [],
+      "runtime": []
+    },
+    "external_libraries": [],
+    "cmake": {
+      "find_packages": [],
+      "extra_sources": [],
+      "extra_include_dirs": [],
+      "extra_link_libraries": []
+    }
+  }
+}

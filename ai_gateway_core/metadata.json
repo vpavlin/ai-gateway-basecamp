@@ -1,0 +1,23 @@
+{
+ "name": "ai_gateway_core",
+ "version": "0.1.0",
+ "type": "core",
+ "interface": "universal",
+ "category": "productivity",
+ "description": "AI Gateway core: one OpenAI-compatible way in to AI for every Logos app. Connectors to local runtimes (Ollama, llama.cpp, LM Studio) and private or decentralised providers (Venice, NEAR AI, Nillion nilAI, Morpheus, AkashML, any OpenAI-compatible endpoint), routing that never goes below the privacy a caller asks for, streaming jobs, per-app usage, keys in a private file, and an optional local OpenAI endpoint on 127.0.0.1.",
+ "main": "ai_gateway_core_plugin",
+ "dependencies": [],
+ "nix": {
+  "packages": {
+   "build": [],
+   "runtime": []
+  },
+  "external_libraries": [],
+  "cmake": {
+   "find_packages": [],
+   "extra_sources": [],
+   "extra_include_dirs": [],
+   "extra_link_libraries": []
+  }
+ }
+}

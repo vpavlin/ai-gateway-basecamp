@@ -1,0 +1,15 @@
+{
+ "presets": null,
+ "connectors": [{"id":"ollama","preset":"ollama","name":"Ollama (this computer)","baseUrl":"http://localhost:11434/v1","apiKey":"","hasKey":false,"enabled":true,"models":2,"error":"","privacy":"local"},
+                {"id":"venice","preset":"venice","name":"Venice","baseUrl":"https://api.venice.ai/api/v1","apiKey":"vnc_••••a1b2","hasKey":true,"enabled":true,"models":3,"error":"","privacy":"standard","balance":{"x-venice-balance-usd":"12.34"}},
+                {"id":"morpheus","preset":"morpheus","name":"Morpheus","baseUrl":"https://api.mor.org/api/v1","apiKey":"sk-••••9z9z","hasKey":true,"enabled":true,"models":0,"error":"the key was refused (HTTP 401)","privacy":"standard"}],
+ "models": [{"id":"ollama/llama3.2","connector":"ollama","connectorName":"Ollama (this computer)","model":"llama3.2","name":"llama3.2","privacy":"local","privacyRank":4},
+            {"id":"ollama/qwen3","connector":"ollama","connectorName":"Ollama (this computer)","model":"qwen3","name":"qwen3","privacy":"local","privacyRank":4},
+            {"id":"venice/venice-uncensored","connector":"venice","connectorName":"Venice","model":"venice-uncensored","name":"venice-uncensored","privacy":"no-retention","privacyRank":1},
+            {"id":"venice/claude-sonnet","connector":"venice","connectorName":"Venice","model":"claude-sonnet","name":"claude-sonnet","privacy":"standard","privacyRank":0}],
+ "settings": {"defaultModel":"","minPrivacy":"standard","server":{"enabled":true,"port":11500}},
+ "serverInfo": {"running":true,"enabled":true,"port":11500,"url":"http://127.0.0.1:11500/v1","token":"aigw-0123456789abcdef0123456789abcdef01234567","error":""},
+ "usage": {"apps":{"ai_gateway":{"requests":12,"promptTokens":3400,"completionTokens":5100},"wb_feedback_demo":{"requests":2,"promptTokens":800,"completionTokens":300}},"connectors":{"ollama":{"requests":10,"promptTokens":3000,"completionTokens":4800},"venice":{"requests":4,"promptTokens":1200,"completionTokens":600}}},
+ "chat": {"ok":true,"jobId":"job-1","model":"ollama/llama3.2","connector":"ollama","privacy":"local"},
+ "job": {"ok":true,"id":"job-1","state":"done","text":"Here is a short summary:\n- The zine is about gardens.\n- It has 12 pages.","model":"ollama/llama3.2","connector":"ollama","privacy":"local"}
+}

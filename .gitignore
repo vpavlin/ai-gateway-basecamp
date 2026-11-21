@@ -1,0 +1,3 @@
+result*
+*.moc
+tools/qml-harness/harness
