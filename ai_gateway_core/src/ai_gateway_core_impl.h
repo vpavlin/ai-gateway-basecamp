@@ -58,6 +58,14 @@ public:
     std::string rotateServerToken();
     // Per-app and per-connector usage: {apps: {...}, connectors: {...}}
     std::string usage();
+    // Open a conversation the gateway keeps (ADR 0002). caller names the app; sessionJson is {title, model?, minPrivacy?, system?, document?}. Returns {ok, sessionId, model, privacy}. The AI Gateway view calls this after the user allows an ai.session intent
+    std::string openSession(std::string caller, std::string sessionJson);
+    // One turn in a session: {message?: text, messages?: [new OpenAI messages], document?: latest full text, temperature?, maxTokens?}. Only what is new is sent; the gateway adds the history. Returns {ok, jobId, model, privacy} like chat()
+    std::string sessionChat(std::string sessionId, std::string turnJson);
+    // Open sessions: [{id, caller, title, model, privacy, turns, documentChars, createdAt, lastUsedAt, busy}]
+    std::string sessions();
+    // End a session (stops a running answer, forgets its history): {ok}
+    std::string closeSession(std::string sessionId);
 
 protected:
     void onContextReady() override;
@@ -72,6 +80,7 @@ private:
     // ── internals (private: only the public methods above are the module's API) ──
     friend class aigw::LocalServer;
     struct Job;
+    struct Session;
     using json = nlohmann::json;
     using Sink = std::function<void(const json& update)>;
     // used by the local endpoint: start a job from an already-parsed request, with a sink for its updates
@@ -96,6 +105,7 @@ private:
     void notify(std::shared_ptr<Job> j, json update);
     void applyServer();
     std::string newId(const char* prefix);
+    void expireSessions();
 
     std::recursive_mutex m_mtx;
     std::string m_dataDir;
@@ -106,6 +116,7 @@ private:
     std::map<std::string, json> m_models;   // connectorId -> [{...}]
     std::map<std::string, std::string> m_modelErrors;
     std::map<std::string, std::shared_ptr<Job>> m_jobs;
+    std::map<std::string, std::shared_ptr<Session>> m_sessions;
     QObject* m_anchor = nullptr;            // lives on the module's thread: network work is posted to it
     QNetworkAccessManager* m_net = nullptr;
     aigw::LocalServer* m_server = nullptr;

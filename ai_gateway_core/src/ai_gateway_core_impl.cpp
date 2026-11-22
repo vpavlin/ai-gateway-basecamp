@@ -31,7 +31,7 @@
 using json = nlohmann::json;
 
 namespace {
-const char* kVersion = "0.1.1";
+const char* kVersion = "0.1.2";
 
 long long nowMs() {
     return std::chrono::duration_cast<std::chrono::milliseconds>(std::chrono::system_clock::now().time_since_epoch()).count();
@@ -103,7 +103,22 @@ struct AiGatewayCoreImpl::Job {
     std::string pendingDelta;
     long long lastEmitMs = 0;
     long long startedMs = 0, finishedMs = 0;
+    std::string sessionId;   // a session turn: on success the turn and the answer join the session's history
+    json turn = json();
 };
+// A conversation the gateway keeps (ADR 0002): the app sends only what is new each turn.
+// In memory only: a restart ends every session (the app opens a new one).
+struct AiGatewayCoreImpl::Session {
+    std::string id, caller, title, model, minPrivacy, system, document, jobId;
+    json history = json::array();   // [{role, content}] user turns + answers, oldest first
+    long long createdMs = 0, lastUsedMs = 0;
+};
+namespace {
+constexpr size_t kSessionMaxMessages = 200;
+constexpr size_t kSessionMaxChars = 400000;   // history kept for the model; the oldest turns go first
+constexpr long long kSessionIdleMs = 12LL * 3600 * 1000;
+constexpr size_t kMaxSessions = 50;
+}
 
 AiGatewayCoreImpl::AiGatewayCoreImpl() {
     try { m_presets = json::parse(aigw::kPresets); } catch (...) { m_presets = json::array(); }
@@ -524,7 +539,22 @@ void AiGatewayCoreImpl::finishJob(std::shared_ptr<Job> j, const std::string& sta
         }
         saveUsage();
     }
+    if (!j->sessionId.empty()) {
+        auto it = m_sessions.find(j->sessionId);
+        if (it != m_sessions.end()) {
+            auto& se = *it->second;
+            if (se.jobId == j->id) se.jobId.clear();
+            if (state == "done") {
+                for (const auto& m : j->turn) se.history.push_back(m);
+                json ans = j->message.is_object() ? j->message : json({{"role", "assistant"}, {"content", j->text}});
+                se.history.push_back(ans);
+                auto chars = [](const json& h) { size_t n = 0; for (const auto& m : h) n += m.dump().size(); return n; };
+                while (se.history.size() > 2 && (se.history.size() > kSessionMaxMessages || chars(se.history) > kSessionMaxChars)) se.history.erase(se.history.begin());
+            }
+        }
+    }
     json up = {{"id", j->id}, {"state", state}, {"text", j->text}};
+    if (!j->sessionId.empty()) up["sessionId"] = j->sessionId;
     if (!j->pendingDelta.empty()) { up["delta"] = j->pendingDelta; j->pendingDelta.clear(); }
     if (!error.empty()) up["error"] = error;
     if (!j->usage.is_null()) up["usage"] = j->usage;
@@ -536,6 +566,106 @@ void AiGatewayCoreImpl::finishJob(std::shared_ptr<Job> j, const std::string& sta
 void AiGatewayCoreImpl::notify(std::shared_ptr<Job> j, json update) {
     if (j->sink) { try { j->sink(update); } catch (...) {} }
     jobUpdate(j->id, update.dump());
+}
+// ── sessions (ADR 0002) ───────────────────────────────────────────────────────────
+void AiGatewayCoreImpl::expireSessions() {
+    for (auto it = m_sessions.begin(); it != m_sessions.end();) {
+        if (it->second->jobId.empty() && nowMs() - it->second->lastUsedMs > kSessionIdleMs) it = m_sessions.erase(it); else ++it;
+    }
+}
+std::string AiGatewayCoreImpl::openSession(std::string caller, std::string sessionJson) {
+    std::lock_guard<std::recursive_mutex> lk(m_mtx);
+    json in;
+    try { in = json::parse(sessionJson); } catch (...) { return json({{"ok", false}, {"error", "the session isn't JSON"}}).dump(); }
+    if (!in.is_object()) return json({{"ok", false}, {"error", "the session must be an object"}}).dump();
+    expireSessions();
+    if (m_sessions.size() >= kMaxSessions) return json({{"ok", false}, {"error", "too many open sessions - close some in AI Gateway"}}).dump();
+    std::string minPrivacy = jstr(m_settings, "minPrivacy", "standard");
+    const std::string asked = jstr(in, "minPrivacy");
+    if (!asked.empty()) {
+        if (tierRank(asked) < 0) return json({{"ok", false}, {"error", "minPrivacy must be one of standard, no-retention, tee, tee-e2ee, local"}}).dump();
+        if (tierRank(asked) > tierRank(minPrivacy)) minPrivacy = asked;
+    }
+    // pick the model now, with the same rules as chat(), so the session reports what it will use
+    std::string want = jstr(in, "model");
+    if (want.empty() || want == "default") want = jstr(m_settings, "defaultModel");
+    json pick;
+    const json all = modelsJson();
+    for (const auto& m : all) if (m.value("privacyRank", -1) >= tierRank(minPrivacy) && !want.empty() && (jstr(m, "id") == want || jstr(m, "model") == want)) { pick = m; break; }
+    if (pick.is_null()) for (const auto& m : all) if (m.value("privacyRank", -1) >= tierRank(minPrivacy) && (pick.is_null() || m.value("privacyRank", -1) > pick.value("privacyRank", -1))) pick = m;
+    if (pick.is_null()) return json({{"ok", false}, {"error", all.empty() ? "no AI connector is set up yet - add one in AI Gateway" : "no available model meets the required privacy (" + minPrivacy + ")"}}).dump();
+    auto se = std::make_shared<Session>();
+    se->id = "ses-" + randomHex(16);   // also the capability: only the app that got the answer knows it
+    se->caller = caller.empty() ? "unknown" : caller.substr(0, 64);
+    se->title = jstr(in, "title").substr(0, 200);
+    se->model = jstr(pick, "id"); se->minPrivacy = minPrivacy;
+    se->system = jstr(in, "system"); se->document = jstr(in, "document");
+    if (se->document.size() > 1000000 || se->system.size() > 100000) return json({{"ok", false}, {"error", "the document (1 MB) or system prompt (100 KB) is too long"}}).dump();
+    se->createdMs = se->lastUsedMs = nowMs();
+    m_sessions[se->id] = se;
+    return json({{"ok", true}, {"sessionId", se->id}, {"model", se->model}, {"privacy", jstr(pick, "privacy")}, {"connectorName", jstr(connectorById(jstr(pick, "connector")), "name")}}).dump();
+}
+std::string AiGatewayCoreImpl::sessionChat(std::string sessionId, std::string turnJson) {
+    std::lock_guard<std::recursive_mutex> lk(m_mtx);
+    expireSessions();
+    auto it = m_sessions.find(sessionId);
+    if (it == m_sessions.end()) return json({{"ok", false}, {"error", "no such session (it was closed, expired, or AI Gateway restarted)"}, {"code", "no_session"}}).dump();
+    auto se = it->second;
+    if (!se->jobId.empty()) return json({{"ok", false}, {"error", "the session is still answering"}, {"code", "busy"}}).dump();
+    json in;
+    try { in = json::parse(turnJson); } catch (...) { return json({{"ok", false}, {"error", "the turn isn't JSON"}}).dump(); }
+    if (!in.is_object()) return json({{"ok", false}, {"error", "the turn must be an object"}}).dump();
+    json turn = json::array();
+    if (in.contains("messages")) {
+        if (!in["messages"].is_array()) return json({{"ok", false}, {"error", "messages must be a list"}}).dump();
+        for (const auto& m : in["messages"]) {
+            if (!m.is_object() || jstr(m, "role").empty()) return json({{"ok", false}, {"error", "every message needs a role"}}).dump();
+            if (jstr(m, "role") == "system") return json({{"ok", false}, {"error", "system messages belong in the session's system"}}).dump();
+            turn.push_back(m);
+        }
+    }
+    if (in.contains("message") && in["message"].is_string() && !in["message"].get<std::string>().empty()) turn.push_back({{"role", "user"}, {"content", in["message"]}});
+    if (in.contains("document")) { if (!in["document"].is_string() || in["document"].get<std::string>().size() > 1000000) return json({{"ok", false}, {"error", "document must be text, at most 1 MB"}}).dump(); se->document = in["document"]; }
+    if (turn.empty()) return json({{"ok", false}, {"error", "a turn needs a message"}}).dump();
+    // what the model sees: the system prompt, the latest document, the history, the new turn
+    json msgs = json::array();
+    std::string sys = se->system;
+    if (!se->document.empty()) sys += (sys.empty() ? "" : "\n\n") + std::string("The document (latest version):\n<<<\n") + se->document + "\n>>>";
+    if (!sys.empty()) msgs.push_back({{"role", "system"}, {"content", sys}});
+    for (const auto& m : se->history) msgs.push_back(m);
+    for (const auto& m : turn) msgs.push_back(m);
+    json req = {{"model", se->model}, {"minPrivacy", se->minPrivacy}, {"messages", msgs}};
+    if (in.contains("temperature") && in["temperature"].is_number()) req["temperature"] = in["temperature"];
+    if (in.contains("maxTokens") && in["maxTokens"].is_number_integer()) req["max_tokens"] = in["maxTokens"];
+    json r = startChat(se->caller, req, nullptr);
+    if (!r.value("ok", false)) return r.dump();
+    auto jt = m_jobs.find(jstr(r, "jobId"));
+    if (jt != m_jobs.end()) { jt->second->sessionId = se->id; jt->second->turn = turn; }
+    se->jobId = jstr(r, "jobId"); se->lastUsedMs = nowMs();
+    r["sessionId"] = se->id;
+    return r.dump();
+}
+std::string AiGatewayCoreImpl::sessions() {
+    std::lock_guard<std::recursive_mutex> lk(m_mtx);
+    expireSessions();
+    json out = json::array();
+    for (const auto& [id, se] : m_sessions)
+        out.push_back({{"id", id}, {"caller", se->caller}, {"title", se->title}, {"model", se->model}, {"minPrivacy", se->minPrivacy},
+                       {"turns", se->history.size() / 2}, {"documentChars", se->document.size()}, {"createdAt", se->createdMs},
+                       {"lastUsedAt", se->lastUsedMs}, {"busy", !se->jobId.empty()}});
+    return out.dump();
+}
+std::string AiGatewayCoreImpl::closeSession(std::string sessionId) {
+    std::string running;
+    {
+        std::lock_guard<std::recursive_mutex> lk(m_mtx);
+        auto it = m_sessions.find(sessionId);
+        if (it == m_sessions.end()) return json({{"ok", false}, {"error", "no such session"}}).dump();
+        running = it->second->jobId;
+        m_sessions.erase(it);
+    }
+    if (!running.empty()) cancelJob(running);
+    return json({{"ok", true}}).dump();
 }
 std::string AiGatewayCoreImpl::job(std::string jobId) {
     std::lock_guard<std::recursive_mutex> lk(m_mtx);

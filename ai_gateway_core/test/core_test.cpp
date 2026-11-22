@@ -108,6 +108,30 @@ int main(int argc, char** argv) {
     json rs = J(core.chat("tester", R"({"model":"venice/echo","messages":[{"role":"user","content":"x"}]})"));
     CHECK(!rs.value("ok", true), "the user's minPrivacy setting is a floor for every caller");
     core.setSettings(R"({"minPrivacy":"standard"})");
+    std::printf("sessions:\n");
+    {
+        json so = J(core.openSession("fileverse_ui", R"({"title":"Notes","model":"venice/echo","system":"Be brief.","document":"v1 text"})"));
+        const std::string sid = so.value("sessionId", "");
+        CHECK(so.value("ok", false) && sid.size() > 20 && so.value("model", "") == "venice/echo", "openSession picks the model and returns a session id");
+        auto turn = [&](const std::string& t) {
+            json r = J(core.sessionChat(sid, t));
+            if (!r.value("ok", false)) return std::string("ERR ") + r.value("error", std::string());
+            const std::string id = r.value("jobId", "");
+            waitUntil([&] { return J(core.job(id)).value("state", "") != "running"; }, 8000);
+            return J(core.job(id)).value("text", std::string());
+        };
+        CHECK(turn(R"({"message":"hi"})") == "echo: hi", "first turn");
+        const std::string t2 = turn(R"({"message":"inspect"})");
+        CHECK(t2 == "roles=system,user,assistant,user doc=v1 text", "the gateway adds system+document+history: " + t2);
+        const std::string t3 = turn(R"({"message":"inspect","document":"v2 text"})");
+        CHECK(t3 == "roles=system,user,assistant,user,assistant,user doc=v2 text", "a new document replaces the old one: " + t3);
+        json sl = J(core.sessions());
+        CHECK(sl.is_array() && sl.size() == 1 && sl[0].value("turns", 0) == 3 && sl[0].value("caller", "") == "fileverse_ui", "sessions() lists it with its turns");
+        CHECK(J(core.sessionChat(sid, R"({"messages":[{"role":"system","content":"x"}]})")).value("ok", true) == false, "a turn can't inject a system message");
+        CHECK(J(core.sessionChat(sid, R"({})")).value("ok", true) == false, "a turn needs a message");
+        CHECK(J(core.closeSession(sid)).value("ok", false) && J(core.sessionChat(sid, R"({"message":"x"})")).value("code", "") == "no_session", "a closed session refuses turns");
+        CHECK(J(core.sessions()).empty(), "and is gone from the list");
+    }
     CHECK(J(core.setSettings(R"({"pinnedModels":["venice/echo","custom/echo"]})")).value("ok", false) && J(core.settings())["pinnedModels"].size() == 2, "pinned models are kept");
     CHECK(!J(core.setSettings(R"({"pinnedModels":"venice/echo"})")).value("ok", true), "pinnedModels must be a list");
     CHECK(!J(core.chat("tester", R"({"model":"venice/echo","minPrivacy":"secret","messages":[{"role":"user","content":"x"}]})")).value("ok", true), "an unknown tier is refused");

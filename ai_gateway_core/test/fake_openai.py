@@ -37,6 +37,10 @@ class H(BaseHTTPRequestHandler):
             self.send_response(500); self.send_header("Content-Type", "application/json"); self.end_headers()
             self.wfile.write(b'{"error":{"message":"model exploded"}}'); return
         reply = "echo: " + str(last)
+        if last == "inspect":   # sessions test: what the gateway sent
+            sysmsg = msgs[0]["content"] if msgs and msgs[0].get("role") == "system" else ""
+            doc = sysmsg.split("<<<\n", 1)[1].split("\n>>>", 1)[0] if "<<<\n" in sysmsg else ""
+            reply = "roles=" + ",".join(m.get("role", "") for m in msgs) + " doc=" + doc
         usage = {"prompt_tokens": 5, "completion_tokens": 7, "total_tokens": 12}
         if req.get("tools"):
             msg = {"role": "assistant", "content": None, "tool_calls": [{"id": "c1", "type": "function", "function": {"name": "f", "arguments": "{}"}}]}

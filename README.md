@@ -9,7 +9,7 @@ labelled.
 - **`ai_gateway`** (view): chat, connector onboarding, settings, and the **`ai.ask` / `ai.chat`
   intents** other apps call.
 
-Status: **core 0.1.1, view 0.1.2** (amd64 test builds on the LAN repo). Not yet in any package repository. Design: `docs/adr/0001-architecture.md`;
+Status: **core 0.1.2, view 0.1.3** (amd64 test builds on the LAN repo). Not yet in any package repository. Design: `docs/adr/0001-architecture.md`;
 research: `docs/research-providers.md`, `docs/research-private-relay.md`; open questions:
 `QUESTIONS.md`.
 
@@ -62,6 +62,21 @@ logos.request("ai.ask", { prompt: "Summarize this in three bullet points", conte
 - Or poll `job(jobId)`.
 
 Never wait for an answer inside a single call: inference outlives the 20 s IPC timeout.
+
+**A conversation (chat panel): `ai.session`, then core calls.** Every intent is confirmed by
+Basecamp, so a per-message `ai.chat` means a dialog per message. Instead (ADR 0002):
+
+1. Ask once with `logos.request("ai.session", { title, purpose, system, document, minPrivacy }, cb)`.
+   The user allows it and picks the model; `res.data` is `{sessionId, model, connector, privacy}`.
+2. Send each turn from your **core**. Declare `"optional_dependencies": ["ai_gateway_core"]`, then
+   call `sessionChat(sessionId, {"message": "…", "document": "<only when it changed>"})` →
+   `{ok, jobId}`.
+   - The gateway keeps the history and the latest document. Send only what is new.
+   - Read the answer from `jobUpdate` events or by polling `job(jobId)`.
+   - `code: "no_session"` means ask again; `code: "busy"` means wait for the answer.
+3. `closeSession(sessionId)` when the panel closes. The user can also end it in Apps & usage.
+
+The document can be up to 1 MB through `sessionChat`, but only 64 KB through the intent.
 
 **From outside Basecamp: the local endpoint.** Enable it in Settings. Point any OpenAI client at
 `http://127.0.0.1:11500/v1` with the token shown there. It supports `/v1/models` and

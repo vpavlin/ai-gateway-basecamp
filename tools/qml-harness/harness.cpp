@@ -139,6 +139,20 @@ int main(int argc, char** argv) {
     settle(1600);
     view.grabWindow().save(out + "/intent-done.png");
     const bool responded = !logos.responses.isEmpty() && logos.responses.last().startsWith("req-1 1 ") && logos.responses.last().contains("\"privacy\":\"local\"");
+    // a chat session: allowed once, answered with a session id
+    root->setProperty("intentState", ""); root->setProperty("page", "chat");
+    QVariantMap sp{{"title", "Garden zine draft"}, {"purpose", "Chat about this document and suggest edits"}, {"system", "You help edit a zine."}, {"document", "# Gardens\nGrowing food on balconies."}};
+    emit logos.intentRequested("req-2", "ai.session", sp, "fileverse_ui");
+    settle(300);
+    view.grabWindow().save(out + "/intent-session.png");
+    QMetaObject::invokeMethod(root, "runIntent");
+    settle(300);
+    const bool sess = !logos.responses.isEmpty() && logos.responses.last().startsWith("req-2 1 ") && logos.responses.last().contains("ses-0123456789abcdef")
+                      && logos.lastArgs.value("openSession").contains("Garden zine draft");
+    fprintf(stderr, "session allowed: %s\n", sess ? "yes" : "NO");
+    if (!sess) g_errors++;
+    root->setProperty("page", "apps"); settle(250);
+    view.grabWindow().save(out + "/apps.png");
     fprintf(stderr, "QML errors: %d, intent answered: %s\n", g_errors, responded ? "yes" : "no");
     return (g_errors == 0 && responded) ? 0 : 1;
 }

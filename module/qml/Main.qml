@@ -33,6 +33,7 @@ Item {
     property var settingsObj: ({})
     property var serverObj: ({})
     property var usageObj: ({})
+    property var sessionList: []
     property string toastMsg: ""
     // chat
     property var chatMessages: []          // [{role, content, model?, privacy?}]
@@ -89,6 +90,7 @@ Item {
         call("settings", [], function (r) { var v = parse(r); if (v) settingsObj = v })
         call("serverInfo", [], function (r) { var v = parse(r); if (v) serverObj = v })
         call("usage", [], function (r) { var v = parse(r); if (v) usageObj = v })
+        call("sessions", [], function (r) { var v = parse(r); if (v) sessionList = v })
     }
     function bestModel(minTier) {
         var def = settingsObj.defaultModel || ""
@@ -171,6 +173,12 @@ Item {
     function intentMessages() {
         var p = intentParams
         if (intentName === "ai.chat") return p.messages || []
+        if (intentName === "ai.session") {
+            var s = []
+            if (p.system) s.push({ role: "system", content: String(p.system) })
+            if (p.document) { var d = String(p.document); s.push({ role: "document", content: d.length > 4000 ? d.substring(0, 4000) + "\n… (" + d.length + " characters in all)" : d }) }
+            return s
+        }
         var m = []
         if (p.system) m.push({ role: "system", content: String(p.system) })
         m.push({ role: "user", content: String(p.prompt || "") + (p.content ? "\n\n" + String(p.content) : "") })
@@ -189,6 +197,19 @@ Item {
     }
     function runIntent() {
         if (!intentModel) { toast("No model meets the privacy this app asked for"); return }
+        if (intentName === "ai.session") {
+            var sp = intentParams
+            var sj = { title: String(sp.title || ""), model: intentModel, minPrivacy: intentFloor(), system: String(sp.system || ""), document: String(sp.document || "") }
+            call("openSession", [intentFrom, JSON.stringify(sj)], function (r) {
+                var v = parse(r)
+                if (!v || !v.ok) { intentState = "error"; intentAnswer = v && v.error ? v.error : "AI Gateway core didn't answer"; finishIntent(false, { message: intentAnswer.substring(0, 300) }, "failed"); return }
+                intentState = "done"
+                intentAnswer = intentFrom + " can now chat about \u201c" + sj.title + "\u201d with " + (v.model || "") + ", without asking each time. End it any time under Apps & usage."
+                finishIntent(true, { sessionId: v.sessionId, model: v.model || "", connector: v.connectorName || "", privacy: v.privacy || "" }, "")
+                refresh()
+            })
+            return
+        }
         var req = { model: intentModel, minPrivacy: intentFloor(), messages: intentMessages() }
         if (intentName === "ai.chat") {
             if (typeof intentParams.temperature === "number") req.temperature = intentParams.temperature
@@ -225,11 +246,12 @@ Item {
             } else if (event === "modelsChanged") root.refresh()
         }
         function onIntentRequested(requestId, intent, params, requesterName) {
-            if (intent !== "ai.ask" && intent !== "ai.chat") return
+            if (intent !== "ai.ask" && intent !== "ai.chat" && intent !== "ai.session") return
             root.startIntent(requestId, intent, params, requesterName)
         }
     }
 
+    Timer { interval: 4000; repeat: true; running: root.page === "apps"; onTriggered: root.refresh() }
     Timer { id: toastTimer; interval: 3500; onTriggered: root.toastMsg = "" }
     Timer { interval: 4000; running: true; repeat: true; onTriggered: if (!root.chatJob && !root.intentJob) root.refresh() }
     Component.onCompleted: {
@@ -459,6 +481,23 @@ Item {
                         delegate: Text { color: root.cText; property var u: root.usageObj.apps[modelData]
                                          text: modelData + ": " + (u.requests || 0) + " requests, " + ((u.promptTokens || 0) + (u.completionTokens || 0)) + " tokens" }
                     }
+                    Text { text: "Open chats"; color: root.cText; font.bold: true; Layout.topMargin: 10 }
+                    Text { visible: root.sessionList.length === 0; color: root.cTert; font.pixelSize: 12; text: "None. An app opens one with the ai.session intent, once you allow it." }
+                    Repeater {
+                        model: root.sessionList
+                        delegate: Rectangle {
+                            Layout.fillWidth: true; implicitHeight: 52; radius: 8; color: root.cSurface; border.color: root.cBorder
+                            Column {
+                                x: 12; anchors.verticalCenter: parent.verticalCenter; width: parent.width - 120
+                                Text { width: parent.width; elide: Text.ElideRight; color: root.cText; font.pixelSize: 13
+                                       text: modelData.caller + "  \u00b7  \u201c" + (modelData.title || "untitled") + "\u201d" + (modelData.busy ? "  \u00b7  answering…" : "") }
+                                Text { width: parent.width; elide: Text.ElideRight; color: root.cTert; font.pixelSize: 11
+                                       text: modelData.model + "  \u00b7  " + modelData.turns + " turns  \u00b7  document " + Math.round((modelData.documentChars || 0) / 1000) + " k chars" }
+                            }
+                            Btn { anchors.right: parent.right; anchors.rightMargin: 10; anchors.verticalCenter: parent.verticalCenter; danger: true; text: "End"
+                                  onClicked: root.call("closeSession", [modelData.id], function () { root.refresh() }) }
+                        }
+                    }
                     Text { text: "By connector"; color: root.cText; font.bold: true; Layout.topMargin: 10 }
                     Repeater {
                         model: Object.keys(root.usageObj.connectors || {})
@@ -512,9 +551,12 @@ Item {
                 visible: root.page === "intent"
                 ColumnLayout {
                     id: inCol; width: Math.min(parent.width, 760); spacing: 8
-                    Text { text: root.intentFrom + " asks AI"; color: root.cText; font.pixelSize: 18; font.bold: true }
+                    Text { Layout.fillWidth: true; wrapMode: Text.Wrap; color: root.cText; font.pixelSize: 18; font.bold: true
+                           text: root.intentName === "ai.session" ? root.intentFrom + " wants to chat with AI about \u201c" + (root.intentParams.title || "") + "\u201d" : root.intentFrom + " asks AI" }
                     Text { Layout.fillWidth: true; wrapMode: Text.Wrap; color: root.cSec
-                           text: "This is exactly what will be sent to the model you choose. Nothing is sent until you press Run." }
+                           text: root.intentName === "ai.session"
+                                 ? (root.intentParams.purpose ? String(root.intentParams.purpose) + "\n\n" : "") + "If you allow it, every message " + root.intentFrom + " sends in this chat goes to the model you choose here without asking again, until the app or you end it (Apps & usage). This is what it starts with:"
+                                 : "This is exactly what will be sent to the model you choose. Nothing is sent until you press Run." }
                     Rectangle {
                         Layout.fillWidth: true; radius: 8; color: root.cSurface; border.color: root.cBorder
                         implicitHeight: Math.min(prev.implicitHeight + 20, 300)
@@ -536,10 +578,10 @@ Item {
                            text: "No model you have set up is private enough for this request. Add a local runtime or a TEE provider in Connectors." }
                     RowLayout {
                         visible: root.intentState === "ask"
-                        Btn { primary: true; text: "Run"; enabled: !!root.intentModel; onClicked: root.runIntent() }
+                        Btn { primary: true; text: root.intentName === "ai.session" ? "Allow this chat" : "Run"; enabled: !!root.intentModel; onClicked: root.runIntent() }
                         Btn { text: "Decline"; onClicked: root.declineIntent() }
                     }
-                    Text { visible: root.intentState !== "ask" && root.intentState !== ""; text: root.intentState === "running" ? "Answering…" : root.intentState === "done" ? "Answer sent back to " + root.intentFrom : "Failed"; color: root.intentState === "error" ? root.cBad : root.cSec }
+                    Text { visible: root.intentState !== "ask" && root.intentState !== ""; text: root.intentState === "running" ? "Answering…" : root.intentState === "done" ? (root.intentName === "ai.session" ? "Chat allowed" : "Answer sent back to " + root.intentFrom) : "Failed"; color: root.intentState === "error" ? root.cBad : root.cSec }
                     TextEdit { visible: root.intentAnswer !== ""; Layout.fillWidth: true; readOnly: true; selectByMouse: true; wrapMode: TextEdit.Wrap; color: root.cText; font.pixelSize: 14; text: root.intentAnswer }
                     Btn { visible: root.intentState === "running"; text: "Stop"; onClicked: root.declineIntent() }
                     Btn { visible: root.intentState === "done" || root.intentState === "error"; text: "Close"; onClicked: { root.intentState = ""; root.page = "chat" } }
