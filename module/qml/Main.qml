@@ -281,7 +281,8 @@ Item {
                     }
                 }
                 Rectangle {
-                    visible: root.intentState !== ""
+                    // only while a request waits or runs; a finished one leaves no entry behind
+                    visible: root.intentState === "ask" || root.intentState === "running" || (root.page === "intent" && root.intentState !== "")
                     Layout.fillWidth: true; height: 34; radius: 6; color: root.page === "intent" ? root.cRaised : "transparent"; border.color: root.cAccent
                     Text { anchors.verticalCenter: parent.verticalCenter; x: 10; text: "Request from " + root.intentFrom; color: root.cAccent; font.pixelSize: 13; elide: Text.ElideRight; width: parent.width - 16 }
                     MouseArea { anchors.fill: parent; onClicked: root.page = "intent" }

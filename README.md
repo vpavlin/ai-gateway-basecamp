@@ -66,6 +66,8 @@ Never wait for an answer inside a single call: inference outlives the 20 s IPC t
 **A conversation (chat panel): `ai.session`, then core calls.** Every intent is confirmed by
 Basecamp, so a per-message `ai.chat` means a dialog per message. Instead (ADR 0002):
 
+0. Declare it in your view's `metadata.json` (`"uses": [{ "intent": "ai.session" }]`), or Basecamp
+   refuses the request with `not_declared`.
 1. Ask once with `logos.request("ai.session", { title, purpose, system, document, minPrivacy }, cb)`.
    The user allows it and picks the model; `res.data` is `{sessionId, model, connector, privacy}`.
 2. Send each turn from your **core**. Declare `"optional_dependencies": ["ai_gateway_core"]`, then
