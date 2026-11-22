@@ -108,6 +108,8 @@ int main(int argc, char** argv) {
     json rs = J(core.chat("tester", R"({"model":"venice/echo","messages":[{"role":"user","content":"x"}]})"));
     CHECK(!rs.value("ok", true), "the user's minPrivacy setting is a floor for every caller");
     core.setSettings(R"({"minPrivacy":"standard"})");
+    CHECK(J(core.setSettings(R"({"pinnedModels":["venice/echo","custom/echo"]})")).value("ok", false) && J(core.settings())["pinnedModels"].size() == 2, "pinned models are kept");
+    CHECK(!J(core.setSettings(R"({"pinnedModels":"venice/echo"})")).value("ok", true), "pinnedModels must be a list");
     CHECK(!J(core.chat("tester", R"({"model":"venice/echo","minPrivacy":"secret","messages":[{"role":"user","content":"x"}]})")).value("ok", true), "an unknown tier is refused");
     CHECK(!J(core.chat("tester", R"({"messages":[]})")).value("ok", true), "no messages: refused");
     // errors and tools

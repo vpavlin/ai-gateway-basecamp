@@ -1,3 +1,4 @@
+#include <QKeyEvent>
 // Render harness: loads the REAL module/qml/Main.qml with a mock `logos` (answers from fixture.json,
 // presets from the core's aigw_presets.hpp), renders each page offscreen, saves screenshots and counts
 // QML errors. usage: harness <Main.qml> <fixture.json> <outdir>
@@ -28,9 +29,11 @@ class MockLogos : public QObject {
 public:
     QJsonObject fx;
     QStringList responses;
+    QMap<QString, QString> lastArgs;
     Q_INVOKABLE QString callModule(const QString& mod, const QString& method, const QVariantList& args) {
         fprintf(stderr, "CALL %s.%s(%d)\n", mod.toUtf8().constData(), method.toUtf8().constData(), (int)args.size());
         if (mod != "ai_gateway_core") return "";
+        if (!args.isEmpty()) lastArgs[method] = args.last().toString();
         if (method == "presets") return QString::fromUtf8(aigw::kPresets);
         if (fx.contains(method)) return QString::fromUtf8(QJsonDocument::fromVariant(fx[method].toVariant()).toJson(QJsonDocument::Compact));
         return "{\"ok\":true}";
@@ -89,6 +92,44 @@ int main(int argc, char** argv) {
     if (partial != "Here is") g_errors++;
     settle(1600);
     view.grabWindow().save(out + "/chat-answer.png");
+    // the model picker: pin, search, Enter picks
+    QMetaObject::invokeMethod(root, "togglePin", Q_ARG(QVariant, QVariant("venice/venice-uncensored")));
+    settle(100);
+    const bool pinSaved = logos.lastArgs.value("setSettings").contains("venice/venice-uncensored");
+    fprintf(stderr, "pin saved: %s\n", pinSaved ? "yes" : "NO");
+    if (!pinSaved) g_errors++;
+    QObject* picker = root->findChild<QObject*>("chatPicker");
+    if (!picker) { fprintf(stderr, "no chatPicker\n"); g_errors++; }
+    else {
+        QMetaObject::invokeMethod(picker, "openList"); settle(250);
+        view.grabWindow().save(out + "/picker-open.png");
+        QObject* search = picker->findChild<QObject*>("pickerSearch");
+        if (!search) { fprintf(stderr, "no pickerSearch\n"); g_errors++; }
+        else {
+            search->setProperty("text", "qwen"); settle(150);
+            view.grabWindow().save(out + "/picker-search.png");
+            QKeyEvent kp(QEvent::KeyPress, Qt::Key_Return, Qt::NoModifier, "\r"); QCoreApplication::sendEvent(view.contentItem()->window(), &kp);
+            settle(150);
+            const QString cm = root->property("chatModel").toString();
+            fprintf(stderr, "search+Enter picked: %s\n", qPrintable(cm));
+            if (cm != "ollama/qwen3") g_errors++;
+        }
+    }
+    // the chat input: Shift+Enter = new line, Enter = send
+    QQuickItem* input = root->findChild<QQuickItem*>("chatInput");
+    if (!input) { fprintf(stderr, "no chatInput\n"); g_errors++; }
+    else {
+        const int before = root->property("chatMessages").toList().size();
+        input->forceActiveFocus(); input->setProperty("text", "line one"); input->setProperty("cursorPosition", 8);
+        QKeyEvent se(QEvent::KeyPress, Qt::Key_Return, Qt::ShiftModifier, "\r"); QCoreApplication::sendEvent(&view, &se); settle(50);
+        const bool newline = input->property("text").toString().contains("\n");
+        QKeyEvent ee(QEvent::KeyPress, Qt::Key_Return, Qt::NoModifier, "\r"); QCoreApplication::sendEvent(&view, &ee); settle(100);
+        const int after = root->property("chatMessages").toList().size();
+        const bool sent = after == before + 1 && input->property("text").toString().isEmpty();
+        fprintf(stderr, "shift+enter newline: %s, enter sends: %s\n", newline ? "yes" : "NO", sent ? "yes" : "NO");
+        if (!newline || !sent) g_errors++;
+        settle(1600);
+    }
     // an app asks: ai.ask with a privacy floor
     QVariantMap params{{"prompt", "Summarize this in three bullet points"}, {"content", "Gardens in the city: a zine about growing food on balconies..."}, {"minPrivacy", "no-retention"}};
     emit logos.intentRequested("req-1", "ai.ask", params, "wb_feedback_demo");

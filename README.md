@@ -9,7 +9,7 @@ labelled.
 - **`ai_gateway`** (view): chat, connector onboarding, settings, and the **`ai.ask` / `ai.chat`
   intents** other apps call.
 
-Status: **0.1.0**. Not yet in any package repository. Design: `docs/adr/0001-architecture.md`;
+Status: **core 0.1.1, view 0.1.2** (amd64 test builds on the LAN repo). Not yet in any package repository. Design: `docs/adr/0001-architecture.md`;
 research: `docs/research-providers.md`, `docs/research-private-relay.md`; open questions:
 `QUESTIONS.md`.
 
@@ -43,7 +43,7 @@ Then call it:
 ```js
 logos.request("ai.ask", { prompt: "Summarize this in three bullet points", content: text, minPrivacy: "no-retention" }, function (res) {
     if (res.ok) show(res.data.text)              // also res.data.model, .connector, .privacy, .usage
-    else console.log("no AI:", res.error)        // unavailable | cancelled | failed | ...
+    else console.log("no AI:", res.error, res.data && res.data.message)  // unavailable | cancelled | failed | ...; on failed a short reason
 })
 ```
 

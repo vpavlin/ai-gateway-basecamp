@@ -103,6 +103,13 @@ Item {
     }
     function modelById(id) { for (var i = 0; i < modelList.length; i++) if (modelList[i].id === id) return modelList[i]; return null }
     function modelsAtLeast(minTier) { var o = []; for (var i = 0; i < modelList.length; i++) if (tierRank(modelList[i].privacy) >= tierRank(minTier)) o.push(modelList[i]); return o }
+    function pinnedList() { return settingsObj.pinnedModels || [] }
+    function togglePin(id) {
+        var p = pinnedList().slice(), i = p.indexOf(id)
+        if (i >= 0) p.splice(i, 1); else p.push(id)
+        var so = Object.assign({}, settingsObj); so.pinnedModels = p; settingsObj = so   // show it at once
+        call("setSettings", [JSON.stringify({ pinnedModels: p })], function (r) { var v = parse(r); if (!v || !v.ok) { toast(v && v.error ? v.error : "couldn't save the pin"); refresh() } })
+    }
     function presetById(id) { for (var i = 0; i < presetList.length; i++) if (presetList[i].id === id) return presetList[i]; return null }
 
     // ── chat ──
@@ -137,7 +144,7 @@ Item {
                     intentAnswer = u.text || intentAnswer; intentState = "done"
                     var m = modelById(u.model)
                     finishIntent(true, { text: intentAnswer, model: u.model || "", connector: u.connector || "", privacy: u.privacy || "", usage: u.usage || {} }, "")
-                } else { intentState = "error"; intentAnswer = u.error || u.state; finishIntent(false, {}, u.state === "cancelled" ? "cancelled" : "failed") }
+                } else { intentState = "error"; intentAnswer = u.error || u.state; finishIntent(false, { message: String(u.error || u.state).substring(0, 300) }, u.state === "cancelled" ? "cancelled" : "failed") }
                 refresh()
             }
         }
@@ -189,7 +196,7 @@ Item {
         }
         call("chat", [intentFrom, JSON.stringify(req)], function (r) {
             var v = parse(r)
-            if (!v || !v.ok) { intentState = "error"; intentAnswer = v && v.error ? v.error : "AI Gateway core didn't answer"; return }
+            if (!v || !v.ok) { intentState = "error"; intentAnswer = v && v.error ? v.error : "AI Gateway core didn't answer"; finishIntent(false, { message: intentAnswer.substring(0, 300) }, "failed"); return }
             intentJob = v.jobId; intentState = "running"
         })
     }
@@ -275,15 +282,14 @@ Item {
                 RowLayout {
                     Layout.fillWidth: true
                     Text { text: "Model"; color: root.cSec }
-                    ComboBox {
-                        id: modelBox
-                        Layout.preferredWidth: 420
-                        model: root.modelList.map(function (m) { return m.name + "  ·  " + m.connectorName + "  ·  " + (root.tierNames[m.privacy] || m.privacy) })
-                        currentIndex: { for (var i = 0; i < root.modelList.length; i++) if (root.modelList[i].id === root.chatModel) return i; return -1 }
-                        onActivated: function (i) { root.chatModel = root.modelList[i].id }
+                    ModelPicker {
+                        objectName: "chatPicker"; Layout.preferredWidth: 460
+                        models: root.modelList; pinned: root.pinnedList(); current: root.chatModel
+                        onPicked: function (id) { root.chatModel = id }
+                        onPinToggled: function (id) { root.togglePin(id) }
                     }
                     Item { Layout.fillWidth: true }
-                    Button { text: "New chat"; onClicked: { root.chatMessages = []; root.chatPartial = "" } }
+                    Btn { text: "New chat"; onClicked: { root.chatMessages = []; root.chatPartial = "" } }
                 }
                 Text {
                     visible: root.modelList.length === 0
@@ -308,15 +314,26 @@ Item {
                 }
                 RowLayout {
                     Layout.fillWidth: true
-                    TextArea {
-                        id: chatInput
-                        Layout.fillWidth: true; Layout.preferredHeight: 70; wrapMode: TextArea.Wrap
-                        placeholderText: "Ask anything (Ctrl+Enter to send)"
-                        Keys.onPressed: function (e) { if ((e.key === Qt.Key_Return || e.key === Qt.Key_Enter) && (e.modifiers & Qt.ControlModifier)) { root.sendChat(chatInput.text); chatInput.text = ""; e.accepted = true } }
+                    ScrollView {
+                        Layout.fillWidth: true; Layout.preferredHeight: Math.min(Math.max(chatInput.implicitHeight, 46), 180)
+                        TextArea {
+                            id: chatInput; objectName: "chatInput"
+                            wrapMode: TextArea.Wrap; font.pixelSize: 14
+                            color: root.cText; placeholderTextColor: root.cTert; selectionColor: "#3d4f80"; selectedTextColor: "#ffffff"
+                            leftPadding: 12; rightPadding: 12; topPadding: 12; bottomPadding: 12
+                            placeholderText: "Ask anything  (Enter sends, Shift+Enter for a new line)"
+                            background: Rectangle { radius: 8; color: "#12151b"; border.color: chatInput.activeFocus ? root.cAccent : root.cBorder }
+                            // Enter sends; Shift+Enter (and IME composition) inserts a new line as usual
+                            Keys.onPressed: function (e) {
+                                if ((e.key === Qt.Key_Return || e.key === Qt.Key_Enter) && !(e.modifiers & Qt.ShiftModifier) && chatInput.preeditText === "") {
+                                    e.accepted = true
+                                    if (!root.chatJob && chatInput.text.trim()) { root.sendChat(chatInput.text); chatInput.text = "" }
+                                }
+                            }
+                        }
                     }
-                    ColumnLayout {
-                        Button { text: root.chatJob ? "Stop" : "Send"; onClicked: { if (root.chatJob) root.call("cancel", [root.chatJob], null); else { root.sendChat(chatInput.text); chatInput.text = "" } } }
-                    }
+                    Btn { Layout.alignment: Qt.AlignBottom; Layout.preferredHeight: 46; primary: !root.chatJob; text: root.chatJob ? "Stop" : "Send"
+                          onClicked: { if (root.chatJob) root.call("cancel", [root.chatJob], null); else { root.sendChat(chatInput.text); chatInput.text = "" } } }
                 }
             }
 
@@ -341,9 +358,9 @@ Item {
                                     Rectangle { radius: 4; color: "transparent"; border.color: root.tierColor(modelData.privacy); implicitWidth: tl.implicitWidth + 10; implicitHeight: tl.implicitHeight + 4
                                                 Text { id: tl; anchors.centerIn: parent; text: modelData.privacyNote ? "Varies by model" : (root.tierNames[modelData.privacy] || modelData.privacy); color: root.tierColor(modelData.privacy); font.pixelSize: 11 } }
                                     Item { Layout.fillWidth: true }
-                                    Button { text: "Test"; onClicked: root.call("testConnector", [modelData.id], function () { root.toast("Testing " + modelData.name + "…") }) }
-                                    Button { text: "Edit"; onClicked: { root.editId = modelData.id; root.editPreset = root.presetById(modelData.preset) } }
-                                    Button { text: "Remove"; onClicked: root.call("removeConnector", [modelData.id], function () { root.refresh() }) }
+                                    Btn { text: "Test"; onClicked: root.call("testConnector", [modelData.id], function () { root.toast("Testing " + modelData.name + "…") }) }
+                                    Btn { text: "Edit"; onClicked: { root.editId = modelData.id; root.editPreset = root.presetById(modelData.preset) } }
+                                    Btn { danger: true; text: "Remove"; onClicked: root.call("removeConnector", [modelData.id], function () { root.refresh() }) }
                                 }
                                 Text { color: root.cSec; font.pixelSize: 12; text: modelData.baseUrl + (modelData.hasKey ? "  ·  key " + modelData.apiKey : "") }
                                 Text { color: modelData.error ? root.cBad : root.cGood; font.pixelSize: 12
@@ -381,7 +398,7 @@ Item {
                     id: edCol; width: Math.min(parent.width, 720); spacing: 8
                     property var p: root.editPreset || ({})
                     RowLayout {
-                        Button { text: "← Back"; onClicked: root.editPreset = null }
+                        Btn { text: "← Back"; onClicked: root.editPreset = null }
                         Text { text: edCol.p.name || ""; color: root.cText; font.pixelSize: 18; font.bold: true }
                     }
                     Text { Layout.fillWidth: true; wrapMode: Text.Wrap; color: root.cSec; text: edCol.p.blurb || "" }
@@ -396,26 +413,27 @@ Item {
                         Layout.fillWidth: true; spacing: 6
                         Repeater {
                             model: Object.keys(edCol.p.links || {})
-                            delegate: Button { text: modelData; onClicked: Qt.openUrlExternally(edCol.p.links[modelData]) }
+                            delegate: Btn { text: modelData; onClicked: Qt.openUrlExternally(edCol.p.links[modelData]) }
                         }
                     }
                     Text { text: "Base URL"; color: root.cSec; Layout.topMargin: 8 }
-                    TextField { id: edUrl; Layout.fillWidth: true; text: edCol.p.baseUrl || ""; placeholderText: "https://…/v1" }
+                    Field { id: edUrl; Layout.fillWidth: true; text: edCol.p.baseUrl || ""; placeholderText: "https://…/v1" }
                     Text { text: edCol.p.needsKey ? "API key" : "API key (optional)"; color: root.cSec }
-                    TextField { id: edKey; Layout.fillWidth: true; echoMode: TextInput.Password; placeholderText: root.editId ? "leave empty to keep the stored key" : "paste the key" }
+                    Field { id: edKey; Layout.fillWidth: true; echoMode: TextInput.Password; placeholderText: root.editId ? "leave empty to keep the stored key" : "paste the key" }
                     RowLayout {
                         visible: edCol.p.id === "custom"
                         Text { text: "Privacy tier"; color: root.cSec }
-                        ComboBox { id: edTier; model: root.tierOrder.map(function (t) { return root.tierNames[t] }) }
+                        TierChips { id: edTier; Layout.fillWidth: true; onChosen: function (t) { value = t } }
                     }
                     RowLayout {
                         Layout.topMargin: 8
-                        Button {
+                        Btn {
+                            primary: true
                             text: root.editId ? "Save" : "Add and test"
                             onClicked: {
                                 var c = { preset: edCol.p.id, baseUrl: edUrl.text.trim(), apiKey: edKey.text.trim() }
                                 if (root.editId) c.id = root.editId
-                                if (edCol.p.id === "custom") c.privacy = root.tierOrder[edTier.currentIndex]
+                                if (edCol.p.id === "custom") c.privacy = edTier.value
                                 root.call("saveConnector", [JSON.stringify(c)], function (r) {
                                     var v = root.parse(r)
                                     if (!v || !v.ok) { root.toast(v && v.error ? v.error : "couldn't save"); return }
@@ -458,33 +476,32 @@ Item {
                     id: setCol; width: Math.min(parent.width, 720); spacing: 8
                     Text { text: "Settings"; color: root.cText; font.pixelSize: 18; font.bold: true }
                     Text { text: "Least private tier any app may use"; color: root.cSec }
-                    ComboBox {
-                        model: root.tierOrder.map(function (t) { return root.tierNames[t] })
-                        currentIndex: Math.max(0, root.tierRank(root.settingsObj.minPrivacy || "standard"))
-                        onActivated: function (i) { root.call("setSettings", [JSON.stringify({ minPrivacy: root.tierOrder[i] })], function () { root.refresh() }) }
+                    TierChips {
+                        Layout.fillWidth: true; value: root.settingsObj.minPrivacy || "standard"
+                        onChosen: function (t) { root.call("setSettings", [JSON.stringify({ minPrivacy: t })], function () { root.refresh() }) }
                     }
                     Text { Layout.fillWidth: true; wrapMode: Text.Wrap; color: root.cTert; font.pixelSize: 12; text: root.tierHelp[root.settingsObj.minPrivacy || "standard"] || "" }
                     Text { text: "Default model"; color: root.cSec; Layout.topMargin: 8 }
-                    ComboBox {
-                        Layout.preferredWidth: 420
-                        model: ["(the most private available)"].concat(root.modelList.map(function (m) { return m.name + "  ·  " + m.connectorName }))
-                        currentIndex: { for (var i = 0; i < root.modelList.length; i++) if (root.modelList[i].id === root.settingsObj.defaultModel) return i + 1; return 0 }
-                        onActivated: function (i) { root.call("setSettings", [JSON.stringify({ defaultModel: i === 0 ? "" : root.modelList[i - 1].id })], function () { root.refresh() }) }
+                    ModelPicker {
+                        Layout.preferredWidth: 460; noneLabel: "The most private model available"
+                        models: root.modelList; pinned: root.pinnedList(); current: root.settingsObj.defaultModel || ""
+                        onPicked: function (id) { root.call("setSettings", [JSON.stringify({ defaultModel: id })], function () { root.refresh() }) }
+                        onPinToggled: function (id) { root.togglePin(id) }
                     }
                     Text { text: "Local OpenAI endpoint"; color: root.cText; font.bold: true; Layout.topMargin: 14 }
                     Text { Layout.fillWidth: true; wrapMode: Text.Wrap; color: root.cSec; font.pixelSize: 12
                            text: "Lets tools outside Basecamp (editors, agents, scripts) use these models as an OpenAI endpoint on this computer only (127.0.0.1), with the token below." }
-                    CheckBox {
+                    Check {
                         text: "Enabled"; checked: !!root.serverObj.enabled
-                        onToggled: root.call("setSettings", [JSON.stringify({ server: { enabled: checked } })], function () { root.refresh() })
+                        onToggled: function (on) { root.call("setSettings", [JSON.stringify({ server: { enabled: on } })], function () { root.refresh() }) }
                     }
                     Text { visible: !!root.serverObj.enabled; color: root.serverObj.running ? root.cGood : root.cBad; textFormat: Text.PlainText
                            text: root.serverObj.running ? ("Base URL " + root.serverObj.url) : ("Not running: " + (root.serverObj.error || "starting…")) }
                     RowLayout {
                         visible: !!root.serverObj.enabled
-                        TextField { id: tokField; Layout.preferredWidth: 360; readOnly: true; text: root.serverObj.token || "" }
-                        Button { text: "Copy"; onClicked: { tokField.selectAll(); tokField.copy(); root.toast("Token copied") } }
-                        Button { text: "New token"; onClicked: root.call("rotateServerToken", [], function () { root.refresh() }) }
+                        Field { id: tokField; Layout.preferredWidth: 360; readOnly: true; text: root.serverObj.token || "" }
+                        Btn { text: "Copy"; onClicked: { tokField.selectAll(); tokField.copy(); root.toast("Token copied") } }
+                        Btn { text: "New token"; onClicked: root.call("rotateServerToken", [], function () { root.refresh() }) }
                     }
                 }
             }
@@ -508,27 +525,162 @@ Item {
                     Text { color: root.cSec; text: "The app asks for at least: " + (root.tierNames[root.intentFloor()] || root.intentFloor()) }
                     RowLayout {
                         Text { text: "Model"; color: root.cSec }
-                        ComboBox {
-                            Layout.preferredWidth: 440
-                            property var opts: root.modelsAtLeast(root.intentFloor())
-                            model: opts.map(function (m) { return m.name + "  ·  " + m.connectorName + "  ·  " + (root.tierNames[m.privacy] || m.privacy) })
-                            currentIndex: { for (var i = 0; i < opts.length; i++) if (opts[i].id === root.intentModel) return i; return -1 }
-                            onActivated: function (i) { root.intentModel = opts[i].id }
-                            enabled: root.intentState === "ask"
+                        ModelPicker {
+                            Layout.preferredWidth: 460; enabled: root.intentState === "ask"
+                            models: root.modelsAtLeast(root.intentFloor()); pinned: root.pinnedList(); current: root.intentModel
+                            onPicked: function (id) { root.intentModel = id }
+                            onPinToggled: function (id) { root.togglePin(id) }
                         }
                     }
                     Text { visible: root.modelsAtLeast(root.intentFloor()).length === 0; color: root.cBad; wrapMode: Text.Wrap; Layout.fillWidth: true
                            text: "No model you have set up is private enough for this request. Add a local runtime or a TEE provider in Connectors." }
                     RowLayout {
                         visible: root.intentState === "ask"
-                        Button { text: "Run"; enabled: !!root.intentModel; onClicked: root.runIntent() }
-                        Button { text: "Decline"; onClicked: root.declineIntent() }
+                        Btn { primary: true; text: "Run"; enabled: !!root.intentModel; onClicked: root.runIntent() }
+                        Btn { text: "Decline"; onClicked: root.declineIntent() }
                     }
                     Text { visible: root.intentState !== "ask" && root.intentState !== ""; text: root.intentState === "running" ? "Answering…" : root.intentState === "done" ? "Answer sent back to " + root.intentFrom : "Failed"; color: root.intentState === "error" ? root.cBad : root.cSec }
                     TextEdit { visible: root.intentAnswer !== ""; Layout.fillWidth: true; readOnly: true; selectByMouse: true; wrapMode: TextEdit.Wrap; color: root.cText; font.pixelSize: 14; text: root.intentAnswer }
-                    Button { visible: root.intentState === "running"; text: "Stop"; onClicked: root.declineIntent() }
-                    Button { visible: root.intentState === "done" || root.intentState === "error"; text: "Close"; onClicked: { root.intentState = ""; root.page = "chat" } }
+                    Btn { visible: root.intentState === "running"; text: "Stop"; onClicked: root.declineIntent() }
+                    Btn { visible: root.intentState === "done" || root.intentState === "error"; text: "Close"; onClicked: { root.intentState = ""; root.page = "chat" } }
                 }
+            }
+        }
+    }
+
+
+    // ── controls: dark, readable, ours (the default Qt style is light and ignores the palette) ──
+    // Inline components can't see this file's ids, so the palette is repeated here.
+    component Btn: Rectangle {
+        id: b
+        property string text: ""
+        property bool primary: false
+        property bool danger: false
+        signal clicked()
+        implicitWidth: bl.implicitWidth + 24; implicitHeight: 32; radius: 6
+        opacity: enabled ? 1 : 0.45
+        color: primary ? (ma.containsMouse ? "#93adff" : "#7c9cff") : (ma.containsMouse ? "#2a2f3a" : "#1f232c")
+        border.color: primary ? "transparent" : (danger ? "#e66a6a" : "#2b303b")
+        Text { id: bl; anchors.centerIn: parent; text: b.text; font.pixelSize: 13; font.bold: b.primary
+               color: b.primary ? "#0f1115" : (b.danger ? "#e66a6a" : "#e6e8ee") }
+        MouseArea { id: ma; anchors.fill: parent; hoverEnabled: true; cursorShape: Qt.PointingHandCursor; onClicked: if (b.enabled) b.clicked() }
+    }
+    component Field: TextField {
+        color: "#e6e8ee"; placeholderTextColor: "#6d7486"; selectionColor: "#3d4f80"; selectedTextColor: "#ffffff"
+        font.pixelSize: 13; leftPadding: 10; rightPadding: 10; topPadding: 7; bottomPadding: 7
+        background: Rectangle { radius: 6; color: "#12151b"; border.color: parent.activeFocus ? "#7c9cff" : "#2b303b" }
+    }
+    component Check: Row {
+        id: ck
+        property bool checked: false
+        property string text: ""
+        signal toggled(bool checked)
+        spacing: 8
+        Rectangle { width: 36; height: 20; radius: 10; color: ck.checked ? "#7c9cff" : "#2b303b"; anchors.verticalCenter: parent.verticalCenter
+            Rectangle { width: 16; height: 16; radius: 8; y: 2; x: ck.checked ? 18 : 2; color: "#e6e8ee"; Behavior on x { NumberAnimation { duration: 120 } } } }
+        Text { text: ck.text; color: "#e6e8ee"; font.pixelSize: 13; anchors.verticalCenter: parent.verticalCenter }
+        TapHandler { onTapped: ck.toggled(!ck.checked) }
+    }
+    // one chip per privacy tier; `value` is the chosen tier id
+    component TierChips: Flow {
+        id: tc
+        property string value: "standard"
+        signal chosen(string tier)
+        spacing: 6
+        Repeater {
+            model: [["standard", "Standard"], ["no-retention", "No retention"], ["tee", "TEE"], ["tee-e2ee", "TEE + E2EE"], ["local", "On this device"]]
+            delegate: Rectangle {
+                property bool on: tc.value === modelData[0]
+                width: ct.implicitWidth + 22; height: 28; radius: 14
+                color: on ? "#25304d" : "#1f232c"; border.color: on ? "#7c9cff" : "#2b303b"
+                Text { id: ct; anchors.centerIn: parent; text: modelData[1]; font.pixelSize: 12; color: parent.on ? "#e6e8ee" : "#a3a9b8" }
+                MouseArea { anchors.fill: parent; cursorShape: Qt.PointingHandCursor; onClicked: tc.chosen(modelData[0]) }
+            }
+        }
+    }
+    // A model chooser: shows the current model, opens a searchable list with the pinned models on top.
+    // The star pins/unpins (persisted by the core as settings.pinnedModels).
+    component ModelPicker: Rectangle {
+        id: mp
+        property var models: []            // [{id, name, connectorName, privacy}]
+        property var pinned: []            // [model id]
+        property string current: ""
+        property string noneLabel: ""      // if set, an extra first row that picks ""
+        signal picked(string id)
+        signal pinToggled(string id)
+        function tierName(t) { return ({ "standard": "Standard", "no-retention": "No retention", "tee": "TEE", "tee-e2ee": "TEE + E2EE", "local": "On this device" })[t] || t || "" }
+        function tierColor(t) { return t === "local" ? "#4fc28a" : (t === "tee" || t === "tee-e2ee") ? "#7c9cff" : t === "no-retention" ? "#e6b450" : "#6d7486" }
+        function find(id) { for (var i = 0; i < models.length; i++) if (models[i].id === id) return models[i]; return null }
+        function rows(q) {
+            q = (q || "").toLowerCase().trim()
+            var match = function (m) { return !q || (m.name + " " + m.id + " " + m.connectorName + " " + tierName(m.privacy)).toLowerCase().indexOf(q) >= 0 }
+            var pins = [], rest = [], out = []
+            for (var i = 0; i < pinned.length; i++) { var p = find(pinned[i]); if (p && match(p)) pins.push(p) }
+            for (var j = 0; j < models.length; j++) if (pinned.indexOf(models[j].id) < 0 && match(models[j])) rest.push(models[j])
+            if (noneLabel && !q) out.push({ none: true })
+            if (pins.length) { out.push({ header: "Pinned" }); out = out.concat(pins) }
+            if (rest.length) { if (pins.length) out.push({ header: "All models" }); out = out.concat(rest) }
+            return out
+        }
+        property var cur: find(current)
+        function openList() { search.text = ""; list.currentIndex = -1; pop.open(); search.forceActiveFocus() }
+        implicitWidth: 420; implicitHeight: 34; radius: 6
+        color: pma.containsMouse ? "#22262f" : "#12151b"; border.color: pop.visible ? "#7c9cff" : "#2b303b"
+        opacity: enabled ? 1 : 0.5
+        Row {
+            anchors.verticalCenter: parent.verticalCenter; x: 10; spacing: 8; width: parent.width - 40; clip: true
+            Rectangle { visible: !!mp.cur; anchors.verticalCenter: parent.verticalCenter; width: 8; height: 8; radius: 4; color: mp.tierColor(mp.cur ? mp.cur.privacy : "") }
+            Text { anchors.verticalCenter: parent.verticalCenter; color: mp.cur || mp.noneLabel ? "#e6e8ee" : "#6d7486"; font.pixelSize: 13; elide: Text.ElideRight; width: parent.width - 16
+                   text: mp.cur ? mp.cur.name + "   " + mp.cur.connectorName + " · " + mp.tierName(mp.cur.privacy) : (mp.noneLabel || (mp.models.length ? "Choose a model" : "No models")) }
+        }
+        Text { anchors.right: parent.right; anchors.rightMargin: 10; anchors.verticalCenter: parent.verticalCenter; text: "▾"; color: "#a3a9b8" }
+        MouseArea { id: pma; anchors.fill: parent; hoverEnabled: true; cursorShape: Qt.PointingHandCursor
+                    onClicked: if (mp.enabled) mp.openList() }
+        Popup {
+            id: pop
+            y: mp.height + 4; width: Math.max(mp.width, 480); height: 420; padding: 8
+            background: Rectangle { color: "#171a21"; radius: 8; border.color: "#2b303b" }
+            property var shown: mp.rows(search.text)
+            function firstModel(from, dir) { for (var i = from; i >= 0 && i < shown.length; i += dir) if (!shown[i].header) return i; return list.currentIndex }
+            function choose(r) { if (!r || r.header) return; pop.close(); mp.picked(r.none ? "" : r.id) }
+            ColumnLayout {
+                anchors.fill: parent; spacing: 6
+                Field {
+                    id: search; objectName: "pickerSearch"; Layout.fillWidth: true; placeholderText: "Search models, providers, privacy…"
+                    Keys.onDownPressed: list.currentIndex = pop.firstModel(list.currentIndex + 1, 1)
+                    Keys.onUpPressed: list.currentIndex = pop.firstModel(list.currentIndex - 1, -1)
+                    Keys.onReturnPressed: pop.choose(pop.shown[list.currentIndex >= 0 ? list.currentIndex : pop.firstModel(0, 1)])
+                    Keys.onEnterPressed: pop.choose(pop.shown[list.currentIndex >= 0 ? list.currentIndex : pop.firstModel(0, 1)])
+                    Keys.onEscapePressed: pop.close()
+                }
+                Text { visible: pop.shown.length === 0; text: "No model matches."; color: "#6d7486"; font.pixelSize: 12; Layout.leftMargin: 4 }
+                ListView {
+                    id: list; Layout.fillWidth: true; Layout.fillHeight: true; clip: true; model: pop.shown
+                    ScrollBar.vertical: ScrollBar {}
+                    delegate: Item {
+                        property var r: modelData
+                        width: list.width; height: r.header ? 26 : 38
+                        Text { visible: !!r.header; text: r.header || ""; color: "#6d7486"; font.pixelSize: 11; font.bold: true; x: 8; anchors.bottom: parent.bottom; anchors.bottomMargin: 4 }
+                        Rectangle {
+                            visible: !r.header; anchors.fill: parent; radius: 6
+                            color: index === list.currentIndex || rma.containsMouse ? "#25304d" : ((r.none ? "" === mp.current : r.id === mp.current) ? "#1f232c" : "transparent")
+                            MouseArea { id: rma; anchors.fill: parent; hoverEnabled: true; cursorShape: Qt.PointingHandCursor; onClicked: pop.choose(r) }
+                            Rectangle { visible: !r.none; x: 10; anchors.verticalCenter: parent.verticalCenter; width: 8; height: 8; radius: 4; color: mp.tierColor(r.privacy) }
+                            Column {
+                                x: 26; anchors.verticalCenter: parent.verticalCenter; width: parent.width - 26 - 40
+                                Text { text: r.none ? mp.noneLabel : (r.name || ""); color: "#e6e8ee"; font.pixelSize: 13; elide: Text.ElideRight; width: parent.width }
+                                Text { visible: !r.none; text: (r.connectorName || "") + " · " + mp.tierName(r.privacy) + (r.name !== r.id ? " · " + r.id : ""); color: "#6d7486"; font.pixelSize: 11; elide: Text.ElideRight; width: parent.width }
+                            }
+                            Text {
+                                visible: !r.none; anchors.right: parent.right; anchors.rightMargin: 12; anchors.verticalCenter: parent.verticalCenter
+                                property bool on: mp.pinned.indexOf(r.id) >= 0
+                                text: on ? "★" : "☆"; font.pixelSize: 17; color: on ? "#e6b450" : (sma.containsMouse ? "#e6e8ee" : "#6d7486")
+                                MouseArea { id: sma; anchors.fill: parent; anchors.margins: -8; hoverEnabled: true; cursorShape: Qt.PointingHandCursor; onClicked: mp.pinToggled(r.id) }
+                            }
+                        }
+                    }
+                }
+                Text { text: "★ pins a model to the top of every list.  ↑↓ Enter to pick."; color: "#6d7486"; font.pixelSize: 11; Layout.leftMargin: 4 }
             }
         }
     }

@@ -1,7 +1,7 @@
 {
   "name": "ai_gateway",
   "display_name": "AI Gateway",
-  "version": "0.1.1",
+  "version": "0.1.2",
   "type": "ui_qml",
   "category": "productivity",
   "description": "AI for every Logos app, local or private first. Set up local models (Ollama, llama.cpp, LM Studio) and private or decentralised providers (Venice, NEAR AI, Nillion nilAI, Morpheus, AkashML) with guided onboarding, chat with them, and let other apps ask AI through the ai.ask and ai.chat intents: you see who asks and exactly what is sent, choose the model and its privacy, and the answer goes back to the app. A view over the ai_gateway_core module.",

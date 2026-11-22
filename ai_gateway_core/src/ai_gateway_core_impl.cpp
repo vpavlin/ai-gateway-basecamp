@@ -31,7 +31,7 @@
 using json = nlohmann::json;
 
 namespace {
-const char* kVersion = "0.1.0";
+const char* kVersion = "0.1.1";
 
 long long nowMs() {
     return std::chrono::duration_cast<std::chrono::milliseconds>(std::chrono::system_clock::now().time_since_epoch()).count();
@@ -131,6 +131,7 @@ void AiGatewayCoreImpl::load() {
     if (!m_settings.is_object()) m_settings = json::object();
     if (!m_settings.contains("minPrivacy") || !m_settings["minPrivacy"].is_string()) m_settings["minPrivacy"] = "standard";
     if (!m_settings.contains("defaultModel") || !m_settings["defaultModel"].is_string()) m_settings["defaultModel"] = "";
+    if (!m_settings.contains("pinnedModels") || !m_settings["pinnedModels"].is_array()) m_settings["pinnedModels"] = json::array();
     if (!m_settings.contains("server") || !m_settings["server"].is_object()) m_settings["server"] = json::object();
     json& sv = m_settings["server"];
     if (!sv.contains("enabled") || !sv["enabled"].is_boolean()) sv["enabled"] = false;
@@ -581,6 +582,13 @@ std::string AiGatewayCoreImpl::setSettings(std::string settingsJson) {
         m_settings["minPrivacy"] = in["minPrivacy"];
     }
     if (in.contains("defaultModel") && in["defaultModel"].is_string()) m_settings["defaultModel"] = in["defaultModel"];
+    // models the user pinned to the top of every picker: ids ("connector/model"), at most 200
+    if (in.contains("pinnedModels")) {
+        if (!in["pinnedModels"].is_array() || in["pinnedModels"].size() > 200) return json({{"ok", false}, {"error", "pinnedModels must be a list of up to 200 model ids"}}).dump();
+        json pins = json::array();
+        for (const auto& v : in["pinnedModels"]) if (v.is_string() && !v.get<std::string>().empty() && v.get<std::string>().size() <= 256) pins.push_back(v);
+        m_settings["pinnedModels"] = pins;
+    }
     if (in.contains("server") && in["server"].is_object()) {
         const json& s = in["server"];
         if (s.contains("enabled") && s["enabled"].is_boolean()) m_settings["server"]["enabled"] = s["enabled"];
