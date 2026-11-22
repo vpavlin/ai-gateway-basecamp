@@ -11,6 +11,7 @@
 #include <QFile>
 #include <QJsonDocument>
 #include <QJsonObject>
+#include <QJsonArray>
 #include <QJSValue>
 #include <QVariantMap>
 #include <cstdio>
@@ -35,7 +36,8 @@ public:
         return "{\"ok\":true}";
     }
     Q_INVOKABLE void callModuleAsync(const QString& mod, const QString& method, const QVariantList& args, const QJSValue& cb, int) {
-        const QString r = callModule(mod, method, args);
+        // like Basecamp: the answer arrives JSON-quoted (a string holding the JSON text)
+        const QString r = QString::fromUtf8(QJsonDocument(QJsonArray{callModule(mod, method, args)}).toJson(QJsonDocument::Compact)).mid(1).chopped(1);
         QJSValue c = cb;
         QTimer::singleShot(0, this, [c, r]() mutable { if (c.isCallable()) c.call({QJSValue(r)}); });
     }

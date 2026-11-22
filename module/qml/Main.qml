@@ -65,7 +65,14 @@ Item {
     function tierRank(t) { return tierOrder.indexOf(t) }
 
     // ── core calls ──
-    function parse(s) { try { return JSON.parse(s) } catch (e) { return null } }
+    // Basecamp hands a core's answer back JSON-quoted, sometimes twice: unwrap the string layers, then
+    // parse the object or array (a bare string must never become a model: Repeaters iterate its chars)
+    function parse(raw) {
+        var s = String(raw === undefined || raw === null ? "" : raw).trim()
+        for (var i = 0; i < 3 && s.charAt(0) === "\""; i++) { try { s = String(JSON.parse(s)).trim() } catch (e) { return null } }
+        if (s.charAt(0) !== "{" && s.charAt(0) !== "[") return null
+        try { return JSON.parse(s) } catch (e) { return null }
+    }
     function call(m, a, cb) {
         var done = function (r) { if (cb) { try { cb(r === undefined || r === null ? "" : String(r)) } catch (e) { console.warn("aigw callback", m, e) } } }
         if (typeof logos === "undefined" || !logos) { Qt.callLater(function () { done("") }); return }
