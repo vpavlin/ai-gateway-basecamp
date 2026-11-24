@@ -33,7 +33,7 @@
 using json = nlohmann::json;
 
 namespace {
-const char* kVersion = "0.1.5";
+const char* kVersion = "0.1.6";
 
 long long nowMs() {
     return std::chrono::duration_cast<std::chrono::milliseconds>(std::chrono::system_clock::now().time_since_epoch()).count();
@@ -122,6 +122,31 @@ std::string originOf(const std::string& url) {
     const QUrl u(QString::fromStdString(url));
     return lowerStr(u.scheme().toStdString()) + "://" + lowerStr(u.host().toStdString()) + ":" + std::to_string(u.port(u.scheme() == "https" ? 443 : 80));
 }
+// what a model can do, where the provider says so; null = unknown (ask the provider and see)
+json boolOrNull(const json& v) { return v.is_boolean() ? v : json(); }
+json capsFor(const json& p, const json& m) {
+    json caps = {{"jsonSchema", nullptr}, {"tools", nullptr}, {"contextTokens", nullptr}};
+    if (p.contains("capabilities") && p["capabilities"].is_object())
+        for (const char* k : {"jsonSchema", "tools"}) if (p["capabilities"].contains(k) && p["capabilities"][k].is_boolean()) caps[k] = p["capabilities"][k];
+    if (p.contains("capabilityPaths") && p["capabilityPaths"].is_object()) {
+        const json& cp = p["capabilityPaths"];
+        for (const char* k : {"jsonSchema", "tools"}) if (cp.contains(k) && cp[k].is_string()) { const json v = boolOrNull(dig(m, cp[k].get<std::string>())); if (!v.is_null()) caps[k] = v; }
+        if (cp.contains("contextTokens") && cp["contextTokens"].is_string()) { const json v = dig(m, cp["contextTokens"].get<std::string>()); if (v.is_number_integer() && v.get<long long>() > 0) caps["contextTokens"] = v; }
+    }
+    if (caps["contextTokens"].is_null())
+        for (const char* path : {"context_length", "max_context_length", "context_window", "meta.n_ctx_train"}) {
+            const json v = dig(m, path);
+            if (v.is_number_integer() && v.get<long long>() > 0 && v.get<long long>() < 100000000) { caps["contextTokens"] = v; break; }
+        }
+    return caps;
+}
+// an OpenAI response_format the gateway passes on: {type: json_schema|json_object|text, ...}
+bool validResponseFormat(const json& f) {
+    if (!f.is_object() || !f.contains("type") || !f["type"].is_string()) return false;
+    const std::string t = f["type"];
+    if (t == "json_schema") return f.contains("json_schema") && f["json_schema"].is_object();
+    return t == "json_object" || t == "text";
+}
 bool isEnabled(const json& c) { return !(c.is_object() && c.contains("enabled") && c["enabled"].is_boolean() && !c["enabled"].get<bool>()); }
 // limits on what a provider may send back (AIGW-7)
 constexpr qint64 kMaxModelsBody = 8LL << 20;      // a /models answer
@@ -161,6 +186,8 @@ struct AiGatewayCoreImpl::Session {
     std::string id, caller, title, model, minPrivacy, system, document, jobId;
     json history = json::array();   // [{role, content}] user turns + answers, oldest first
     long long createdMs = 0, lastUsedMs = 0;
+    size_t maxHistoryChars = 400000; // the app may lower it (historyChars in a turn)
+    long long sentChars = 0;        // what this session has sent to models, in characters (shown to the user)
 };
 namespace {
 constexpr size_t kSessionMaxMessages = 200;
@@ -441,8 +468,11 @@ void AiGatewayCoreImpl::fetchModels(const std::string& connectorId, const std::s
                     if (p.contains("nameField") && p["nameField"].is_string()) name = jstr(m, p["nameField"].get<std::string>().c_str(), mid);
                     if (name.empty() || name.size() > kMaxModelIdLen) name = mid;
                     const std::string tier = tierFor(c, m);
-                    list.push_back(json({{"id", connectorId + "/" + mid}, {"connector", connectorId}, {"connectorName", jstr(c, "name")}, {"model", mid},
-                                         {"name", name}, {"privacy", tier}, {"privacyRank", tierRank(tier)}, {"verified", tier == "local"}}));
+                    json entry = {{"id", connectorId + "/" + mid}, {"connector", connectorId}, {"connectorName", jstr(c, "name")}, {"model", mid},
+                                  {"name", name}, {"privacy", tier}, {"privacyRank", tierRank(tier)}, {"verified", tier == "local"}};
+                    const json caps = capsFor(p, m);
+                    for (auto it = caps.begin(); it != caps.end(); ++it) entry[it.key()] = it.value();
+                    list.push_back(entry);
                 }
             } catch (...) { err = "the answer wasn't a model list"; }
         }
@@ -510,6 +540,16 @@ json AiGatewayCoreImpl::startChat(const std::string& caller0, const json& req0, 
         for (const auto& m : all) if (ok(m) && (pick.is_null() || m.value("privacyRank", -1) > pick.value("privacyRank", -1))) pick = m;
     }
     if (pick.is_null()) return json({{"ok", false}, {"error", all.empty() ? "no AI connector is set up yet - add one in AI Gateway" : "no available model meets the required privacy (" + minPrivacy + ")"}});
+    // structured output: responseFormat (or OpenAI's response_format) goes to the provider as response_format
+    if (req.contains("responseFormat")) {
+        if (!validResponseFormat(req["responseFormat"])) return json({{"ok", false}, {"error", "responseFormat must be {type: json_schema, json_schema: {...}} or {type: json_object|text}"}});
+        if (!req.contains("response_format")) req["response_format"] = req["responseFormat"];
+        req.erase("responseFormat");
+    }
+    if (req.contains("response_format") && validResponseFormat(req["response_format"]) && req["response_format"]["type"] == "json_schema" && pick.value("jsonSchema", json()).is_boolean() && !pick["jsonSchema"].get<bool>())
+        return json({{"ok", false}, {"error", "model " + jstr(pick, "id") + " doesn't support json_schema output (models() lists jsonSchema per model)"}, {"code", "unsupported"}});
+    if (req.contains("tools") && req["tools"].is_array() && !req["tools"].empty() && pick.value("tools", json()).is_boolean() && !pick["tools"].get<bool>())
+        return json({{"ok", false}, {"error", "model " + jstr(pick, "id") + " doesn't support tool calls (models() lists tools per model)"}, {"code", "unsupported"}});
     const json c = connectorById(jstr(pick, "connector"));
     auto j = std::make_shared<Job>();
     j->id = newId("job-"); j->watch = "w-" + randomHex(8); j->kind = "chat"; j->caller = caller; j->connector = jstr(pick, "connector"); j->model = jstr(pick, "id");
@@ -530,10 +570,12 @@ json AiGatewayCoreImpl::startChat(const std::string& caller0, const json& req0, 
     // usage: count the request now (tokens come with the answer)
     json& a = m_usage["apps"][caller];
     if (!a.is_object()) a = json::object();
-    a["requests"] = a.value("requests", 0) + 1; a["lastAt"] = nowMs();
+    a["requests"] = safeCount(a, "requests") + 1; a["lastAt"] = nowMs();
+    // what the app sent, in characters (the user sees it per app in Apps & usage)
+    a["sentChars"] = safeCount(a, "sentChars") + (long long)(body.contains("messages") ? body["messages"].dump().size() : 0);
     json& u = m_usage["connectors"][j->connector];
     if (!u.is_object()) u = json::object();
-    u["requests"] = u.value("requests", 0) + 1; u["lastAt"] = nowMs();
+    u["requests"] = safeCount(u, "requests") + 1; u["lastAt"] = nowMs();
     saveUsage();
     post([this, j, body] { runChat(j, body); });
     // old jobs go after an hour
@@ -669,8 +711,8 @@ void AiGatewayCoreImpl::finishJob(std::shared_ptr<Job> j, const std::string& sta
         const long long pt = safeCount(j->usage, "prompt_tokens"), ct = safeCount(j->usage, "completion_tokens");
         for (json* u : {&m_usage["apps"][j->caller], &m_usage["connectors"][j->connector]}) {
             if (!u->is_object()) *u = json::object();
-            (*u)["promptTokens"] = (*u).value("promptTokens", 0LL) + pt;
-            (*u)["completionTokens"] = (*u).value("completionTokens", 0LL) + ct;
+            (*u)["promptTokens"] = safeCount(*u, "promptTokens") + pt;
+            (*u)["completionTokens"] = safeCount(*u, "completionTokens") + ct;
         }
         saveUsage();
     }
@@ -684,7 +726,7 @@ void AiGatewayCoreImpl::finishJob(std::shared_ptr<Job> j, const std::string& sta
                 json ans = j->message.is_object() ? j->message : json({{"role", "assistant"}, {"content", j->text}});
                 se.history.push_back(ans);
                 auto chars = [](const json& h) { size_t n = 0; for (const auto& m : h) n += m.dump().size(); return n; };
-                while (!se.history.empty() && (se.history.size() > kSessionMaxMessages || chars(se.history) > kSessionMaxChars)) se.history.erase(se.history.begin());
+                while (!se.history.empty() && (se.history.size() > kSessionMaxMessages || chars(se.history) > std::min(kSessionMaxChars, se.maxHistoryChars))) se.history.erase(se.history.begin());
             }
         }
     }
@@ -766,22 +808,52 @@ std::string AiGatewayCoreImpl::sessionChat(std::string sessionId, std::string tu
     if (in.contains("message") && in["message"].is_string() && !in["message"].get<std::string>().empty()) turn.push_back({{"role", "user"}, {"content", in["message"]}});
     if (in.contains("document")) { if (!in["document"].is_string() || in["document"].get<std::string>().size() > 1000000) return json({{"ok", false}, {"error", "document must be text, at most 1 MB"}}).dump(); se->document = in["document"]; }
     if (turn.empty()) return json({{"ok", false}, {"error", "a turn needs a message"}}).dump();
-    if (turn.dump().size() > kMaxTurnBytes) return json({{"ok", false}, {"error", "the message is too large (1 MB at most)"}}).dump();
+    // context: text for THIS call only (fresh app state); never kept in the history
+    std::string context;
+    if (in.contains("context")) {
+        if (!in["context"].is_string() || in["context"].get<std::string>().size() > 262144) return json({{"ok", false}, {"error", "context must be text, at most 256 KB"}}).dump();
+        context = in["context"];
+    }
+    // the app's history policy: how much history to keep (and send), and a fresh start
+    if (in.contains("historyChars")) {
+        if (!in["historyChars"].is_number_integer() || in["historyChars"].get<long long>() < 0 || in["historyChars"].get<long long>() > (long long)kSessionMaxChars)
+            return json({{"ok", false}, {"error", "historyChars must be 0-400000"}}).dump();
+        se->maxHistoryChars = (size_t)in["historyChars"].get<long long>();
+    }
+    if (in.contains("resetHistory") && in["resetHistory"].is_boolean() && in["resetHistory"].get<bool>()) se->history = json::array();
+    if (turn.dump().size() + context.size() > kMaxTurnBytes) return json({{"ok", false}, {"error", "the message is too large (1 MB at most)"}}).dump();
     // what the model sees: the system prompt, the latest document, the history, the new turn
     json msgs = json::array();
     std::string sys = se->system;
     if (!se->document.empty()) sys += (sys.empty() ? "" : "\n\n") + std::string("The document (latest version):\n<<<\n") + se->document + "\n>>>";
     if (!sys.empty()) msgs.push_back({{"role", "system"}, {"content", sys}});
-    for (const auto& m : se->history) msgs.push_back(m);
+    // history that fits: the session's limit, and the model's context window where known (~3 chars a token,
+    // leaving room for the system prompt, the context, the turn and the answer); the oldest goes first
+    size_t budget = std::min(kSessionMaxChars, se->maxHistoryChars);
+    for (const auto& m : modelsJson()) if (jstr(m, "id") == se->model && m.value("contextTokens", json()).is_number_integer()) {
+        const long long win = m["contextTokens"].get<long long>() * 3, used = (long long)(sys.size() + context.size() + turn.dump().size()) + 4096 * 3;
+        budget = std::min<size_t>(budget, win > used ? (size_t)((win - used) * 0.9) : 0);
+    }
+    size_t first = se->history.size(), total = 0;
+    while (first > 0 && total + se->history[first - 1].dump().size() <= budget) { total += se->history[first - 1].dump().size(); first--; }
+    for (size_t i = first; i < se->history.size(); i++) msgs.push_back(se->history[i]);
+    if (!context.empty()) msgs.push_back({{"role", "system"}, {"content", "Current state (for this request only):\n" + context}});
     for (const auto& m : turn) msgs.push_back(m);
     json req = {{"model", se->model}, {"minPrivacy", se->minPrivacy}, {"messages", msgs}};
     if (in.contains("temperature") && in["temperature"].is_number()) req["temperature"] = in["temperature"];
     if (in.contains("maxTokens") && in["maxTokens"].is_number_integer()) req["max_tokens"] = in["maxTokens"];
+    if (in.contains("responseFormat")) req["responseFormat"] = in["responseFormat"];
+    if (in.contains("tools")) {
+        if (!in["tools"].is_array() || in["tools"].dump().size() > 65536) return json({{"ok", false}, {"error", "tools must be a list (64 KB at most)"}}).dump();
+        req["tools"] = in["tools"];
+        if (in.contains("toolChoice")) req["tool_choice"] = in["toolChoice"];
+    }
     json r = startChat(se->caller, req, nullptr);
     if (!r.value("ok", false)) return r.dump();
     auto jt = m_jobs.find(jstr(r, "jobId"));
     if (jt != m_jobs.end()) { jt->second->sessionId = se->id; jt->second->turn = turn; }
     se->jobId = jstr(r, "jobId"); se->lastUsedMs = nowMs();
+    se->sentChars += (long long)msgs.dump().size();
     r["sessionId"] = se->id;
     return r.dump();
 }
@@ -791,7 +863,7 @@ std::string AiGatewayCoreImpl::sessions() {
     json out = json::array();
     for (const auto& [id, se] : m_sessions)
         out.push_back({{"handle", id.substr(0, 12)}, {"caller", se->caller}, {"title", se->title}, {"model", se->model}, {"minPrivacy", se->minPrivacy},
-                       {"turns", se->history.size() / 2}, {"documentChars", se->document.size()}, {"createdAt", se->createdMs},
+                       {"turns", se->history.size() / 2}, {"documentChars", se->document.size()}, {"sentChars", se->sentChars}, {"createdAt", se->createdMs},
                        {"lastUsedAt", se->lastUsedMs}, {"busy", !se->jobId.empty()}});
     return out.dump();
 }

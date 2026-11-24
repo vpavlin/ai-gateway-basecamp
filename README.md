@@ -9,7 +9,7 @@ labelled.
 - **`ai_gateway`** (view): chat, connector onboarding, settings, and the **`ai.ask` / `ai.chat`
   intents** other apps call.
 
-Status: **core 0.1.5, view 0.1.7**. Remote providers are hidden until the user acknowledges a warning (ADR 0003 covers the security review). Source: https://github.com/vpavlin/ai-gateway-basecamp. Issues: https://github.com/vpavlin/ai-gateway-basecamp/issues
+Status: **core 0.1.6, view 0.1.8**. Remote providers are hidden until the user acknowledges a warning (ADR 0003 covers the security review). Source: https://github.com/vpavlin/ai-gateway-basecamp. Issues: https://github.com/vpavlin/ai-gateway-basecamp/issues
 Design: `docs/adr/0001-architecture.md`;
 research: `docs/research-providers.md`, `docs/research-private-relay.md`; open questions:
 `QUESTIONS.md`.
@@ -92,6 +92,16 @@ Basecamp, so a per-message `ai.chat` means a dialog per message. Instead (ADR 00
 3. `closeSession(sessionId)` when the panel closes. The user can also end it in Apps & usage.
 
 The document can be up to 1 MB through `sessionChat`, but only 64 KB through the intent.
+
+**Assistants (structured output, tools, per-turn state; ADR 0004).** A `sessionChat` turn may also carry:
+- `responseFormat`: `{type:"json_schema", json_schema:{name, schema, strict}}`, sent as OpenAI
+  `response_format`. `models()` says per model `jsonSchema`, `tools` and `contextTokens` (`null` = unknown).
+- `tools` / `toolChoice`: OpenAI tool calling. The answer's `message.tool_calls` is in `job()`.
+- `context`: fresh state for this call only (e.g. installed apps). Never kept in the history.
+- `historyChars` (0-400,000) and `resetHistory`: how much conversation is kept. History that doesn't fit the
+  model's context window is left out, oldest first.
+
+`chat()` takes `responseFormat` (or OpenAI `response_format`) and `tools` too.
 
 **From outside Basecamp: the local endpoint.** Enable it in Settings. Point any OpenAI client at
 `http://127.0.0.1:11500/v1` with the token shown there. It supports `/v1/models` and

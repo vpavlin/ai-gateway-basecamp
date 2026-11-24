@@ -80,6 +80,13 @@ int main(int argc, char** argv) {
     std::map<std::string, std::string> tier;
     for (auto& m : J(core.models())) tier[m.value("model", "")] = m.value("privacy", "");
     CHECK(tier["echo"] == "no-retention" && tier["anon"] == "standard" && tier["broken"] == "standard", "privacy per model from model_spec.privacy");
+    {
+        json echo, anon; for (auto& m : J(core.models())) { if (m.value("model", "") == "echo") echo = m; if (m.value("model", "") == "anon") anon = m; }
+        CHECK(echo.value("jsonSchema", false) == true && echo.value("tools", false) == true && echo.value("contextTokens", 0) == 32768 && anon.value("jsonSchema", true) == false && echo.contains("jsonSchema"), "models() says per model: jsonSchema, tools, context window");
+        json un = J(core.chat("tester", R"({"model":"venice/anon","responseFormat":{"type":"json_schema","json_schema":{"name":"x","schema":{}}},"messages":[{"role":"user","content":"x"}]})"));
+        CHECK(!un.value("ok", true) && un.value("code", "") == "unsupported", "json_schema on a model that can't: a clear error");
+        CHECK(!J(core.chat("tester", R"({"model":"venice/echo","responseFormat":{"type":"yaml"},"messages":[{"role":"user","content":"x"}]})")).value("ok", true), "a bad responseFormat is refused");
+    }
     CHECK(J(core.connectors())[0].contains("balance"), "balance header kept");
     // a "local" custom connector on the same fake: the most private route
     core.saveConnector(R"({"preset":"custom","name":"Local box","baseUrl":"http://127.0.0.1:18765/v1","apiKey":"sekret","privacy":"local"})");
@@ -180,6 +187,17 @@ int main(int argc, char** argv) {
         CHECK(J(core.sessionChat(sl[0].value("handle", ""), R"({"message":"x"})")).value("code", "") == "no_session", "AIGW-2: a handle can't continue a session");
         CHECK(J(core.sessionChat(sid, R"({"messages":[{"role":"system","content":"x"}]})")).value("ok", true) == false, "a turn can't inject a system message");
         CHECK(J(core.sessionChat(sid, R"({})")).value("ok", true) == false, "a turn needs a message");
+        // basecamp-voice: ephemeral context, structured output, history policy, sent size
+        const std::string t4 = turn(R"({"message":"inspect","context":"apps: scala, kym"})");
+        CHECK(t4.find(" ctx") != std::string::npos, "a turn's context reaches the model: " + t4);
+        const std::string t5 = turn(R"({"message":"inspect"})");
+        CHECK(t5.find(" ctx") == std::string::npos, "and is not kept in the history: " + t5);
+        const std::string t6 = turn(R"({"message":"plan","responseFormat":{"type":"json_schema","json_schema":{"name":"plan","schema":{"type":"object"}}}})");
+        CHECK(t6.find("json_schema") != std::string::npos && t6.find("plan") != std::string::npos, "responseFormat goes to the provider as response_format: " + t6);
+        const std::string t7 = turn(R"({"message":"inspect","resetHistory":true})");
+        CHECK(t7.rfind("roles=system,user ", 0) == 0, "resetHistory starts the history over: " + t7);
+        CHECK(J(core.sessionChat(sid, R"({"message":"x","historyChars":-1})")).value("ok", true) == false, "historyChars is checked");
+        CHECK(J(core.sessions())[0].value("sentChars", 0) > 0, "sessions() shows what a session has sent");
         CHECK(J(core.closeSession(sid)).value("ok", false) && J(core.sessionChat(sid, R"({"message":"x"})")).value("code", "") == "no_session", "a closed session refuses turns");
         CHECK(J(core.sessions()).empty(), "and is gone from the list");
         json s2 = J(core.openSession("other", R"({"title":"T2","model":"venice/echo"})"));

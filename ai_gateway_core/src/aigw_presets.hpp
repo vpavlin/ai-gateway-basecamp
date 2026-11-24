@@ -11,27 +11,29 @@
 //                    a provider's names can't be trusted to be complete, so the list fails safe
 //   skipPrefixes     model ids this version can't use (e.g. E2EE-only models: needs the E2EE protocol)
 //   nameField        a /models field to show instead of the id (Morpheus ids are hex addresses)
+//   capabilities     what every model of a preset can do ({jsonSchema, tools}); capabilityPaths: where a
+//                    /models entry says it per model (+ contextTokens). Unknown = null in models()
 //   experimental     built from the provider's docs but not yet tried with a real key: the view says so
 //                    and asks for issue reports
 namespace aigw {
 inline const char* kPresets = R"json([
   {
     "id": "ollama", "name": "Ollama (this computer)", "kind": "local",
-    "baseUrl": "http://localhost:11434/v1", "needsKey": false, "privacy": "local",
+    "baseUrl": "http://localhost:11434/v1", "needsKey": false, "privacy": "local", "capabilities": { "jsonSchema": true, "tools": true },
     "blurb": "Runs models on this computer. Nothing leaves your machine.",
     "links": { "home": "https://ollama.com", "download": "https://ollama.com/download", "models": "https://ollama.com/library" },
     "steps": ["Install Ollama from ollama.com/download and start it.", "Download a model, e.g. `ollama pull llama3.2` or `ollama pull qwen3`.", "Press Test: the models you pulled appear here."]
   },
   {
     "id": "llamacpp", "experimental": true, "name": "llama.cpp server (this computer)", "kind": "local",
-    "baseUrl": "http://127.0.0.1:8080/v1", "needsKey": false, "privacy": "local",
+    "baseUrl": "http://127.0.0.1:8080/v1", "needsKey": false, "privacy": "local", "capabilities": { "jsonSchema": true, "tools": true },
     "blurb": "llama.cpp's llama-server running a GGUF model locally.",
     "links": { "home": "https://github.com/ggml-org/llama.cpp/tree/master/tools/server" },
     "steps": ["Start `llama-server -m your-model.gguf` (port 8080).", "Press Test."]
   },
   {
     "id": "lmstudio", "experimental": true, "name": "LM Studio (this computer)", "kind": "local",
-    "baseUrl": "http://localhost:1234/v1", "needsKey": false, "privacy": "local",
+    "baseUrl": "http://localhost:1234/v1", "needsKey": false, "privacy": "local", "capabilities": { "jsonSchema": true, "tools": true },
     "blurb": "LM Studio's local server.",
     "links": { "home": "https://lmstudio.ai", "docs": "https://lmstudio.ai/docs/app/api/endpoints/openai" },
     "steps": ["In LM Studio, load a model and start the server (Developer tab).", "Press Test."]
@@ -40,7 +42,7 @@ inline const char* kPresets = R"json([
     "id": "venice", "name": "Venice", "kind": "private",
     "baseUrl": "https://api.venice.ai/api/v1", "needsKey": true, "privacy": "standard",
     "privacyField": "model_spec.privacy", "privacyMap": { "private": "no-retention", "anonymized": "standard" },
-    "skipPrefixes": ["e2ee-"], "privacyNote": "Per model: no retention (private) or standard (anonymized)", "balanceHeaders": ["x-venice-balance-usd", "x-venice-balance-diem"],
+    "skipPrefixes": ["e2ee-"], "capabilityPaths": { "jsonSchema": "model_spec.capabilities.supportsResponseSchema", "tools": "model_spec.capabilities.supportsFunctionCalling", "contextTokens": "model_spec.availableContextTokens" }, "privacyNote": "Per model: no retention (private) or standard (anonymized)", "balanceHeaders": ["x-venice-balance-usd", "x-venice-balance-diem"],
     "blurb": "Private models are not retained (Venice's promise); anonymized ones go to a third party with your identity hidden. TEE and end-to-end encrypted models come in a later version.",
     "links": { "home": "https://venice.ai", "signup": "https://venice.ai/sign-up", "keys": "https://venice.ai/settings/api", "pricing": "https://docs.venice.ai/pricing", "stake": "https://docs.venice.ai/overview/vvv-diem", "x402": "https://docs.venice.ai/guides/integrations/x402-venice-api" },
     "funding": ["USD credits (card or crypto), never expire", "Stake VVV, mint DIEM: each DIEM gives $1 of inference a day", "x402: top up a USDC balance from a wallet on Base or Solana"],

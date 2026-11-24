@@ -18,8 +18,8 @@ class H(BaseHTTPRequestHandler):
         if not self.authed(): return
         if self.path.rstrip("/").endswith("/models"):
             body = {"object": "list", "data": [
-                {"id": "echo", "object": "model", "model_spec": {"privacy": "private"}},
-                {"id": "anon", "object": "model", "model_spec": {"privacy": "anonymized"}},
+                {"id": "echo", "object": "model", "model_spec": {"privacy": "private", "availableContextTokens": 32768, "capabilities": {"supportsResponseSchema": True, "supportsFunctionCalling": True}}},
+                {"id": "anon", "object": "model", "model_spec": {"privacy": "anonymized", "capabilities": {"supportsResponseSchema": False}}},
                 {"id": "broken", "object": "model"},
                 {"id": "e2ee-secret", "object": "model"},
                 {"id": "img", "object": "model", "type": "image"}]}
@@ -37,10 +37,13 @@ class H(BaseHTTPRequestHandler):
             self.send_response(500); self.send_header("Content-Type", "application/json"); self.end_headers()
             self.wfile.write(b'{"error":{"message":"model exploded"}}'); return
         reply = "echo: " + str(last)
+        if req.get("response_format"):   # structured output reached the provider
+            reply = json.dumps({"format": req["response_format"].get("type"), "name": (req["response_format"].get("json_schema") or {}).get("name")})
         if last == "inspect":   # sessions test: what the gateway sent
             sysmsg = msgs[0]["content"] if msgs and msgs[0].get("role") == "system" else ""
             doc = sysmsg.split("<<<\n", 1)[1].split("\n>>>", 1)[0] if "<<<\n" in sysmsg else ""
             reply = "roles=" + ",".join(m.get("role", "") for m in msgs) + " doc=" + doc
+            if any("Current state" in str(m.get("content", "")) for m in msgs): reply += " ctx"
         usage = {"prompt_tokens": 5, "completion_tokens": 7, "total_tokens": 12}
         # like OpenAI/Ollama: a stream reports usage only when asked with stream_options.include_usage
         want_usage = bool((req.get("stream_options") or {}).get("include_usage"))
