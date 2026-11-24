@@ -127,6 +127,7 @@ Item {
         var h = m[1].toLowerCase()
         return h === "localhost" || h === "[::1]" || h.indexOf("127.") === 0
     }
+    function kchars(n) { n = Number(n || 0); return n < 1000 ? n + " chars" : (n < 1000000 ? Math.round(n / 1000) + " k chars" : (n / 1000000).toFixed(1) + " M chars") }
     function isLocalPreset(p) { return !!p && (p.kind === "local" || p.id === "custom") }
     function localPresets() { return presetList.filter(function (p) { return isLocalPreset(p) }) }
     function remotePresets() { return presetList.filter(function (p) { return !isLocalPreset(p) }) }
@@ -547,11 +548,11 @@ Item {
                     id: appCol; width: parent.width; spacing: 8
                     Text { textFormat: Text.PlainText; text: "Apps & usage"; color: root.cText; font.pixelSize: 18; font.bold: true }
                     Text { textFormat: Text.PlainText; Layout.fillWidth: true; wrapMode: Text.Wrap; color: root.cSec
-                           text: "Apps ask for AI with the ai.ask / ai.chat intents (you approve each request) or call the core directly. Names are what each app declares." }
+                           text: "Apps ask for AI with the ai.ask / ai.chat intents (you approve each request) or open a chat with ai.session (you approve it once, then end it here). \"Sent\" is how much text each app has sent to models. Names are what each app declares." }
                     Repeater {
                         model: Object.keys(root.usageObj.apps || {})
                         delegate: Text { textFormat: Text.PlainText; color: root.cText; property var u: root.usageObj.apps[modelData]
-                                         text: modelData + ": " + (u.requests || 0) + " requests, " + ((u.promptTokens || 0) + (u.completionTokens || 0)) + " tokens" }
+                                         text: modelData + ": " + (u.requests || 0) + " requests, sent " + root.kchars(u.sentChars) + ", " + ((u.promptTokens || 0) + (u.completionTokens || 0)) + " tokens" }
                     }
                     Text { textFormat: Text.PlainText; text: "Open chats"; color: root.cText; font.bold: true; Layout.topMargin: 10 }
                     Text { textFormat: Text.PlainText; visible: root.sessionList.length === 0; color: root.cTert; font.pixelSize: 12; text: "None. An app opens one with the ai.session intent, once you allow it." }
@@ -564,7 +565,7 @@ Item {
                                 Text { textFormat: Text.PlainText; width: parent.width; elide: Text.ElideRight; color: root.cText; font.pixelSize: 13
                                        text: modelData.caller + "  \u00b7  \u201c" + (modelData.title || "untitled") + "\u201d" + (modelData.busy ? "  \u00b7  answering…" : "") }
                                 Text { textFormat: Text.PlainText; width: parent.width; elide: Text.ElideRight; color: root.cTert; font.pixelSize: 11
-                                       text: modelData.model + "  \u00b7  " + modelData.turns + " turns  \u00b7  document " + Math.round((modelData.documentChars || 0) / 1000) + " k chars" }
+                                       text: modelData.model + "  \u00b7  " + modelData.turns + " turns  \u00b7  sent " + root.kchars(modelData.sentChars) + "  \u00b7  document " + root.kchars(modelData.documentChars) }
                             }
                             Btn { anchors.right: parent.right; anchors.rightMargin: 10; anchors.verticalCenter: parent.verticalCenter; danger: true; text: "End"
                                   onClicked: root.call("closeSession", [modelData.handle], function () { root.refresh() }) }

@@ -100,12 +100,14 @@
    "ai_gateway": {
     "requests": 12,
     "promptTokens": 3400,
-    "completionTokens": 5100
+    "completionTokens": 5100,
+    "sentChars": 123456
    },
    "wb_feedback_demo": {
     "requests": 2,
     "promptTokens": 800,
-    "completionTokens": 300
+    "completionTokens": 300,
+    "sentChars": 123456
    }
   },
   "connectors": {
@@ -156,7 +158,8 @@
    "documentChars": 12800,
    "createdAt": 0,
    "lastUsedAt": 0,
-   "busy": false
+   "busy": false,
+   "sentChars": 48211
   }
  ]
 }
