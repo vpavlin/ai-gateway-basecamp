@@ -22,5 +22,6 @@ private:
     AiGatewayCoreImpl* m_core;
     QTcpServer* m_srv;
     int m_port = 0;
+    int m_open = 0;   // open connections (capped)
 };
 }  // namespace aigw

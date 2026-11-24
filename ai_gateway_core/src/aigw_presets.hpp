@@ -6,7 +6,9 @@
 // privacy tiers (worst -> best): standard < no-retention < tee < tee-e2ee < local
 //   privacy          the connector's default tier for its models
 //   privacyField     a dotted path in a /models entry whose value picks the tier via privacyMap
-//   standardPrefixes model ids proxied elsewhere (no better than standard whatever the provider is)
+//   standardPrefixes model ids proxied elsewhere (no better than standard whatever the provider is), case-insensitive
+//   teePrefixes      the only model ids that keep a TEE tier (case-insensitive); anything else is standard:
+//                    a provider's names can't be trusted to be complete, so the list fails safe
 //   skipPrefixes     model ids this version can't use (e.g. E2EE-only models: needs the E2EE protocol)
 //   nameField        a /models field to show instead of the id (Morpheus ids are hex addresses)
 //   experimental     built from the provider's docs but not yet tried with a real key: the view says so
@@ -47,7 +49,8 @@ inline const char* kPresets = R"json([
   {
     "id": "nearai", "experimental": true, "name": "NEAR AI Cloud", "kind": "private",
     "baseUrl": "https://cloud-api.near.ai/v1", "needsKey": true, "privacy": "tee",
-    "standardPrefixes": ["openai/", "anthropic/", "google/", "gpt-", "claude", "gemini"], "privacyNote": "TEE for open models; standard for proxied OpenAI/Anthropic/Google ones",
+    "teePrefixes": ["deepseek-ai/", "deepseek", "qwen/", "qwen", "zai-org/", "glm", "openai/gpt-oss", "gpt-oss", "meta-llama/", "llama", "mistralai/", "mistral", "google/gemma", "gemma", "moonshotai/", "kimi", "nousresearch/", "hermes"],
+    "standardPrefixes": ["openai/", "anthropic/", "google/", "azure", "gpt", "chatgpt", "o1", "o3", "o4", "claude", "gemini", "grok", "x-ai/", "xai/"], "privacyNote": "TEE for the open models it runs itself; standard for anything else (proxied OpenAI/Anthropic/Google and unknown names)",
     "blurb": "Open models run in confidential computing (Intel TDX + NVIDIA H200) behind a gateway that also runs in a TEE; attestation is public. Proxied frontier models (OpenAI, Anthropic, Google) are only as private as their provider.",
     "links": { "home": "https://near.ai", "signup": "https://cloud.near.ai", "docs": "https://docs.near.ai/cloud/", "stake": "https://docs.near.ai/cloud/staking-for-inference/overview.md", "attestation": "https://docs.near.ai/cloud/private-inference.md" },
     "funding": ["Credits (1 credit = $1)", "Stake NEAR: the staking rewards become inference credits"],

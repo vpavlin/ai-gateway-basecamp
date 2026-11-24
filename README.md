@@ -9,7 +9,7 @@ labelled.
 - **`ai_gateway`** (view): chat, connector onboarding, settings, and the **`ai.ask` / `ai.chat`
   intents** other apps call.
 
-Status: **core 0.1.3, view 0.1.5**. Source: https://github.com/vpavlin/ai-gateway-basecamp. Issues: https://github.com/vpavlin/ai-gateway-basecamp/issues
+Status: **core 0.1.4, view 0.1.6** (after the 2026-11-24 security review, ADR 0003). Source: https://github.com/vpavlin/ai-gateway-basecamp. Issues: https://github.com/vpavlin/ai-gateway-basecamp/issues
 Design: `docs/adr/0001-architecture.md`;
 research: `docs/research-providers.md`, `docs/research-private-relay.md`; open questions:
 `QUESTIONS.md`.
@@ -62,9 +62,10 @@ logos.request("ai.ask", { prompt: "Summarize this in three bullet points", conte
 
 - `chat(caller, requestJson)` → `{ok, jobId, model, privacy}`. `requestJson` is an OpenAI chat request
   plus optional `connector` and `minPrivacy`.
-- The answer streams as `jobUpdate(jobId, json)` events: `{state, delta}`, then
-  `{state: done|error, text, usage}`.
-- Or poll `job(jobId)`.
+- Read the answer with `job(jobId)`: `{state: running|done|error|cancelled, text, usage}`.
+  - Keep `jobId` to yourself: it is what lets you read the answer.
+  - `jobUpdate(watchId, {id, state})` events only say that something changed. Every module can see events,
+    so they carry no text; react to one by calling `job(jobId)`.
 
 Never wait for an answer inside a single call: inference outlives the 20 s IPC timeout.
 
@@ -79,7 +80,7 @@ Basecamp, so a per-message `ai.chat` means a dialog per message. Instead (ADR 00
    call `sessionChat(sessionId, {"message": "…", "document": "<only when it changed>"})` →
    `{ok, jobId}`.
    - The gateway keeps the history and the latest document. Send only what is new.
-   - Read the answer from `jobUpdate` events or by polling `job(jobId)`.
+   - Read the answer with `job(jobId)` (poll it; a `jobUpdate` event for your `watchId` means "look now").
    - `code: "no_session"` means ask again; `code: "busy"` means wait for the answer.
 3. `closeSession(sessionId)` when the panel closes. The user can also end it in Apps & usage.
 

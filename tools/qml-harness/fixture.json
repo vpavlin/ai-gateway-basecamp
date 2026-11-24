@@ -126,7 +126,8 @@
   "jobId": "job-1",
   "model": "ollama/llama3.2",
   "connector": "ollama",
-  "privacy": "local"
+  "privacy": "local",
+  "watchId": "w-1"
  },
  "job": {
   "ok": true,

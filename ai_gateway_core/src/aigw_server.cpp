@@ -5,6 +5,7 @@
 #include <QPointer>
 #include <QTcpServer>
 #include <QTcpSocket>
+#include <QTimer>
 
 #include <algorithm>
 #include <cctype>
@@ -16,6 +17,8 @@ using json = nlohmann::json;
 namespace aigw {
 namespace {
 constexpr size_t kMaxRequest = 4u << 20;   // 4 MiB: long prompts, not uploads
+constexpr int kMaxConnections = 32;          // a same-user process can't exhaust file descriptors
+constexpr int kReadTimeoutMs = 30000;        // the whole request must arrive within 30 s (no slowloris)
 
 std::string lower(std::string s) { std::transform(s.begin(), s.end(), s.begin(), [](unsigned char c) { return (char)std::tolower(c); }); return s; }
 void send(QTcpSocket* s, int status, const char* reason, const std::string& ctype, const std::string& body) {
@@ -47,10 +50,14 @@ bool LocalServer::start(int port, std::string& error) {
 
 void LocalServer::accept() {
     while (QTcpSocket* s = m_srv->nextPendingConnection()) {
+        if (m_open >= kMaxConnections) { s->abort(); s->deleteLater(); continue; }
+        m_open++;
+        QObject::connect(s, &QObject::destroyed, m_srv, [this] { m_open--; });
         auto buf = std::make_shared<std::string>();
         auto handled = std::make_shared<bool>(false);
         QObject::connect(s, &QTcpSocket::disconnected, s, &QObject::deleteLater);
-        QObject::connect(s, &QTcpSocket::readyRead, s, [this, s, buf, handled] {
+        QTimer::singleShot(kReadTimeoutMs, s, [s, handled] { if (!*handled) { *handled = true; s->abort(); s->deleteLater(); } });
+        auto onRead = [this, s, buf, handled] {
             if (*handled) { s->readAll(); return; }
             const QByteArray in = s->readAll();
             buf->append(in.constData(), (size_t)in.size());
@@ -66,7 +73,7 @@ void LocalServer::accept() {
             const std::string method = reqLine.substr(0, sp1);
             std::string path = reqLine.substr(sp1 + 1, sp2 - sp1 - 1);
             if (path.find('?') != std::string::npos) path = path.substr(0, path.find('?'));
-            size_t contentLength = 0; std::string auth;
+            size_t contentLength = 0; std::string auth, host, origin;
             size_t pos = le == std::string::npos ? head.size() : le + 2;
             while (pos < head.size()) {
                 size_t e = head.find("\r\n", pos); if (e == std::string::npos) e = head.size();
@@ -77,6 +84,8 @@ void LocalServer::accept() {
                     std::string v = line.substr(c + 1); while (!v.empty() && v[0] == ' ') v.erase(0, 1);
                     if (k == "content-length") { try { contentLength = (size_t)std::stoull(v); } catch (...) { contentLength = kMaxRequest + 1; } }
                     if (k == "authorization") auth = v;
+                    if (k == "host") host = lower(v);
+                    if (k == "origin") origin = v;
                 }
                 pos = e + 2;
             }
@@ -84,6 +93,12 @@ void LocalServer::accept() {
             if (buf->size() < hdrEnd + 4 + contentLength) return;   // wait for the body
             *handled = true;
             const std::string body = buf->substr(hdrEnd + 4, contentLength);
+            // only this computer's own clients: a web page (Origin) or a rebinding DNS name (Host) is refused
+            const std::string p = std::to_string(m_port);
+            if (!(host == "127.0.0.1:" + p || host == "localhost:" + p || host == "[::1]:" + p || host == "127.0.0.1" || host == "localhost")) {
+                sendError(s, 403, "Forbidden", "only http://127.0.0.1:" + p + " is served", "invalid_request_error"); return;
+            }
+            if (!origin.empty()) { sendError(s, 403, "Forbidden", "browser requests are not served", "invalid_request_error"); return; }
             if (method == "GET" && path == "/health") { send(s, 200, "OK", "application/json", "{\"ok\":true}"); return; }
             // every other route needs the token
             const std::string bearer = auth.rfind("Bearer ", 0) == 0 ? auth.substr(7) : "";
@@ -99,7 +114,10 @@ void LocalServer::accept() {
             if (method == "POST" && (path == "/v1/chat/completions" || path == "/chat/completions")) {
                 json req;
                 try { req = json::parse(body); } catch (...) { sendError(s, 400, "Bad Request", "the body isn't JSON", "invalid_request_error"); return; }
-                const bool stream = req.is_object() && req.value("stream", false);
+                if (!req.is_object()) { sendError(s, 400, "Bad Request", "the body must be a JSON object", "invalid_request_error"); return; }
+                // only a real boolean; a request with tools is answered whole (the core doesn't stream tool calls)
+                const bool hasTools = req.contains("tools") && req["tools"].is_array() && !req["tools"].empty();
+                const bool stream = req.contains("stream") && req["stream"].is_boolean() && req["stream"].get<bool>() && !hasTools;
                 QPointer<QTcpSocket> sock(s);
                 auto started = std::make_shared<bool>(false);
                 auto jid = std::make_shared<std::string>();
@@ -149,6 +167,11 @@ void LocalServer::accept() {
                 return;
             }
             sendError(s, 404, "Not Found", "unknown route " + method + " " + path, "invalid_request_error");
+        };
+        // nothing a client sends may take the process down (AIGW-5)
+        QObject::connect(s, &QTcpSocket::readyRead, s, [s, handled, onRead] {
+            try { onRead(); }
+            catch (...) { if (!*handled) *handled = true; sendError(s, 500, "Internal Server Error", "the request couldn't be handled", "server_error"); }
         });
     }
 }

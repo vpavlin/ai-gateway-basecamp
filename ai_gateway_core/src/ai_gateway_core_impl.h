@@ -30,19 +30,19 @@ public:
     std::string about();
     // The built-in connector presets (providers, links, onboarding steps, privacy) as a JSON array
     std::string presets();
-    // Configured connectors (keys masked) as a JSON array
+    // Configured connectors (keys masked to the last 4 characters) as a JSON array
     std::string connectors();
-    // Add or update a connector: {id?, preset, name?, baseUrl?, apiKey?, enabled?}. An empty or absent apiKey keeps the stored one. Returns {ok, id}
+    // Add or update a connector: {id?, preset, name?, baseUrl?, apiKey?, enabled?}. An empty or absent apiKey keeps the stored one, unless the base URL moves to another origin: then the key is forgotten. Returns {ok, id, keyCleared?}
     std::string saveConnector(std::string connectorJson);
     // Remove a connector and forget its key: {ok}
     std::string removeConnector(std::string id);
-    // Check a connector (lists its models): {ok, jobId}; the answer arrives as a jobUpdate event and from job()
+    // Check a connector (lists its models): {ok, jobId, watchId}; read the result with job(jobId)
     std::string testConnector(std::string id);
     // Every usable model: [{id: "connector/model", connector, model, name, privacy, privacyRank, verified}]
     std::string models();
     // Re-read every enabled connector's model list (async): {ok}
     std::string refreshModels();
-    // Start a chat completion. caller names the app asking; requestJson is an OpenAI chat request plus optional {connector, minPrivacy}. Returns {ok, jobId, model, connector, privacy} or {ok:false, error}
+    // Start a chat completion. caller names the app asking; requestJson is an OpenAI chat request plus optional {connector, minPrivacy}. Returns {ok, jobId, watchId, model, connector, privacy} or {ok:false, error}. Keep jobId to yourself: job(jobId) returns the answer; events only carry watchId
     std::string chat(std::string caller, std::string requestJson);
     // A job: {id, state: running|done|error|cancelled, text, message, model, connector, privacy, usage, error, caller}
     std::string job(std::string jobId);
@@ -62,17 +62,17 @@ public:
     std::string openSession(std::string caller, std::string sessionJson);
     // One turn in a session: {message?: text, messages?: [new OpenAI messages], document?: latest full text, temperature?, maxTokens?}. Only what is new is sent; the gateway adds the history. Returns {ok, jobId, model, privacy} like chat()
     std::string sessionChat(std::string sessionId, std::string turnJson);
-    // Open sessions: [{id, caller, title, model, privacy, turns, documentChars, createdAt, lastUsedAt, busy}]
+    // Open sessions, without their ids: [{handle, caller, title, model, minPrivacy, turns, documentChars, createdAt, lastUsedAt, busy}]. A handle can only close a session
     std::string sessions();
-    // End a session (stops a running answer, forgets its history): {ok}
+    // End a session by its id or its handle (stops a running answer, forgets its history): {ok}
     std::string closeSession(std::string sessionId);
 
 protected:
     void onContextReady() override;
 
 logos_events:
-    // A job changed: {id, state, delta?, text?, error?, usage?}
-    void jobUpdate(const std::string& jobId, const std::string& updateJson);
+    // A job changed: {id: watchId, state}. Every module can see events, so they carry no content: read it with job(jobId)
+    void jobUpdate(const std::string& watchId, const std::string& updateJson);
     // The model list changed
     void modelsChanged(const std::string& modelsJson);
 

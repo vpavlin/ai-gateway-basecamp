@@ -85,11 +85,13 @@ int main(int argc, char** argv) {
     root->setProperty("page", "chat");
     QMetaObject::invokeMethod(root, "sendChat", Q_ARG(QVariant, QVariant("Summarize my zine")));
     settle(100);
-    emit logos.moduleEventReceived("ai_gateway_core", "jobUpdate", QVariantMap{{"arg0", "job-1"}, {"arg1", "{\"id\":\"job-1\",\"state\":\"running\",\"delta\":\"Here is\"}"}});
-    settle(50);
-    const QString partial = root->property("chatPartial").toString();
-    fprintf(stderr, "event delta seen: %s\n", partial == "Here is" ? "yes" : qPrintable("NO (" + partial + ")"));
-    if (partial != "Here is") g_errors++;
+    // events carry only the public watch id and the state; the view must read the answer with job() at once
+    emit logos.moduleEventReceived("ai_gateway_core", "jobUpdate", QVariantMap{{"arg0", "w-1"}, {"arg1", "{\"id\":\"w-1\",\"state\":\"done\"}"}});
+    settle(80);   // well before the 400 ms poll
+    const QVariantList msgs = root->property("chatMessages").toList();
+    const bool got = root->property("chatJob").toString().isEmpty() && !msgs.isEmpty() && msgs.last().toMap().value("content").toString().startsWith("Here is");
+    fprintf(stderr, "event delta seen: %s\n", got ? "yes" : "NO");
+    if (!got) g_errors++;
     settle(1600);
     view.grabWindow().save(out + "/chat-answer.png");
     // the model picker: pin, search, Enter picks

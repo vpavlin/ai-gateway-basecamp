@@ -41,6 +41,7 @@ Item {
     property var chatMessages: []          // [{role, content, model?, privacy?}]
     property string chatModel: ""
     property string chatJob: ""
+    property string chatWatch: ""          // the job's public id in jobUpdate events (they carry no content)
     property string chatPartial: ""
     // connector editor
     property var editPreset: null
@@ -52,6 +53,7 @@ Item {
     property var intentParams: ({})
     property string intentModel: ""
     property string intentJob: ""
+    property string intentWatch: ""
     property string intentAnswer: ""
     property string intentState: ""       // "", ask, running, done, error
 
@@ -126,7 +128,7 @@ Item {
         call("chat", ["ai_gateway", JSON.stringify(req)], function (r) {
             var v = parse(r)
             if (!v || !v.ok) { toast(v && v.error ? v.error : "AI Gateway core didn't answer"); return }
-            chatJob = v.jobId; chatPartial = ""
+            chatJob = v.jobId; chatWatch = v.watchId || ""; chatPartial = ""
         })
     }
     function onJobUpdate(id, u) {
@@ -153,22 +155,23 @@ Item {
             }
         }
     }
-    // poll as a fallback for hosts that don't forward module events
+    // Answers are read with job(jobId): the jobUpdate event only says "something changed" (every module
+    // can see events, so they carry no text). Poll while a job runs; an event polls at once.
+    function pollJob(id) {
+        if (!id) return
+        call("job", [id], function (r) {
+            var v = parse(r); if (!v || !v.ok) return
+            if (id !== chatJob && id !== intentJob) return
+            var known = id === chatJob ? chatPartial : intentAnswer
+            var u = { state: v.state, text: v.text, model: v.model, connector: v.connector, privacy: v.privacy, error: v.error, usage: v.usage }
+            if (v.state === "running" && v.text && v.text.length > known.length) u.delta = v.text.substring(known.length)
+            if (v.state === "running" && !u.delta) return
+            onJobUpdate(id, u)
+        })
+    }
     Timer {
-        interval: 700; repeat: true; running: !!(root.chatJob || root.intentJob)
-        onTriggered: {
-            [root.chatJob, root.intentJob].forEach(function (id) {
-                if (!id) return
-                root.call("job", [id], function (r) {
-                    var v = root.parse(r); if (!v || !v.ok) return
-                    var known = id === root.chatJob ? root.chatPartial : root.intentAnswer
-                    var u = { state: v.state, text: v.text, model: v.model, connector: v.connector, privacy: v.privacy, error: v.error, usage: v.usage }
-                    if (v.state === "running" && v.text && v.text.length > known.length) u.delta = v.text.substring(known.length)
-                    if (v.state === "running" && !u.delta) return
-                    root.onJobUpdate(id, u)
-                })
-            })
-        }
+        interval: 400; repeat: true; running: !!(root.chatJob || root.intentJob)
+        onTriggered: { root.pollJob(root.chatJob); root.pollJob(root.intentJob) }
     }
 
     // ── intents (ai.ask / ai.chat) ──
@@ -178,7 +181,8 @@ Item {
         if (intentName === "ai.session") {
             var s = []
             if (p.system) s.push({ role: "system", content: String(p.system) })
-            if (p.document) { var d = String(p.document); s.push({ role: "document", content: d.length > 4000 ? d.substring(0, 4000) + "\n… (" + d.length + " characters in all)" : d }) }
+            // the whole document: the preview must be exactly what is sent (it scrolls)
+            if (p.document) s.push({ role: "document", content: String(p.document) })
             return s
         }
         var m = []
@@ -220,7 +224,7 @@ Item {
         call("chat", [intentFrom, JSON.stringify(req)], function (r) {
             var v = parse(r)
             if (!v || !v.ok) { intentState = "error"; intentAnswer = v && v.error ? v.error : "AI Gateway core didn't answer"; finishIntent(false, { message: intentAnswer.substring(0, 300) }, "failed"); return }
-            intentJob = v.jobId; intentState = "running"
+            intentJob = v.jobId; intentWatch = v.watchId || ""; intentState = "running"
         })
     }
     function finishIntent(ok, data, err) {
@@ -238,13 +242,11 @@ Item {
         function onModuleEventReceived(module, event, data) {
             if (module !== "ai_gateway_core") return
             if (event === "jobUpdate") {
-                // the runtime delivers an event's arguments as {arg0, arg1} (seen with logosctl 0.3.1);
-                // an array or named fields are accepted too
+                // {arg0: watchId, arg1: {id, state}} (logosctl 0.3.1); an array or named fields too
                 var args = Array.isArray(data) ? data : null
-                var id = args ? args[0] : (data && (data.arg0 || data.jobId))
-                var raw = args ? args[1] : (data && (data.arg1 || data.updateJson))
-                var u = typeof raw === "string" ? root.parse(raw) : raw
-                if (id && u) root.onJobUpdate(id, u)
+                var w = args ? args[0] : (data && (data.arg0 || data.watchId || data.jobId))
+                if (w && w === root.chatWatch) root.pollJob(root.chatJob)
+                if (w && w === root.intentWatch) root.pollJob(root.intentJob)
             } else if (event === "modelsChanged") root.refresh()
         }
         function onIntentRequested(requestId, intent, params, requesterName) {
@@ -272,13 +274,13 @@ Item {
             Layout.fillHeight: true; Layout.preferredWidth: 200; color: root.cSurface
             ColumnLayout {
                 anchors.fill: parent; anchors.margins: 14; spacing: 4
-                Text { text: "AI Gateway"; color: root.cText; font.pixelSize: 18; font.bold: true; Layout.bottomMargin: 10 }
+                Text { textFormat: Text.PlainText; text: "AI Gateway"; color: root.cText; font.pixelSize: 18; font.bold: true; Layout.bottomMargin: 10 }
                 Repeater {
                     model: [["chat", "Chat"], ["connectors", "Connectors"], ["apps", "Apps & usage"], ["settings", "Settings"]]
                     delegate: Rectangle {
                         Layout.fillWidth: true; height: 34; radius: 6
                         color: root.page === modelData[0] ? root.cRaised : "transparent"
-                        Text { anchors.verticalCenter: parent.verticalCenter; x: 10; text: modelData[1]; color: root.page === modelData[0] ? root.cText : root.cSec; font.pixelSize: 14 }
+                        Text { textFormat: Text.PlainText; anchors.verticalCenter: parent.verticalCenter; x: 10; text: modelData[1]; color: root.page === modelData[0] ? root.cText : root.cSec; font.pixelSize: 14 }
                         MouseArea { anchors.fill: parent; cursorShape: Qt.PointingHandCursor; onClicked: root.page = modelData[0] }
                     }
                 }
@@ -286,11 +288,11 @@ Item {
                     // only while a request waits or runs; a finished one leaves no entry behind
                     visible: root.intentState === "ask" || root.intentState === "running" || (root.page === "intent" && root.intentState !== "")
                     Layout.fillWidth: true; height: 34; radius: 6; color: root.page === "intent" ? root.cRaised : "transparent"; border.color: root.cAccent
-                    Text { anchors.verticalCenter: parent.verticalCenter; x: 10; text: "Request from " + root.intentFrom; color: root.cAccent; font.pixelSize: 13; elide: Text.ElideRight; width: parent.width - 16 }
+                    Text { textFormat: Text.PlainText; anchors.verticalCenter: parent.verticalCenter; x: 10; text: "Request from " + root.intentFrom; color: root.cAccent; font.pixelSize: 13; elide: Text.ElideRight; width: parent.width - 16 }
                     MouseArea { anchors.fill: parent; onClicked: root.page = "intent" }
                 }
                 Item { Layout.fillHeight: true }
-                Text {
+                Text { textFormat: Text.PlainText;
                     Layout.fillWidth: true; wrapMode: Text.Wrap; color: root.cTert; font.pixelSize: 11
                     text: root.modelList.length + " models from " + root.connectorList.length + " connectors"
                 }
@@ -306,7 +308,7 @@ Item {
                 visible: root.page === "chat"
                 RowLayout {
                     Layout.fillWidth: true
-                    Text { text: "Model"; color: root.cSec }
+                    Text { textFormat: Text.PlainText; text: "Model"; color: root.cSec }
                     ModelPicker {
                         objectName: "chatPicker"; Layout.preferredWidth: 460
                         models: root.modelList; pinned: root.pinnedList(); current: root.chatModel
@@ -316,7 +318,7 @@ Item {
                     Item { Layout.fillWidth: true }
                     Btn { text: "New chat"; onClicked: { root.chatMessages = []; root.chatPartial = "" } }
                 }
-                Text {
+                Text { textFormat: Text.PlainText;
                     visible: root.modelList.length === 0
                     Layout.fillWidth: true; wrapMode: Text.Wrap; color: root.cSec
                     text: "No models yet. Open Connectors and set up a local runtime (Ollama is the easiest) or a private provider."
@@ -331,7 +333,7 @@ Item {
                         width: chatView.width; radius: 8
                         color: m.role === "user" ? root.cRaised : m.role === "error" ? Theme.colors.getColor(root.cBad, 0.15) : root.cSurface
                         height: body.implicitHeight + meta.implicitHeight + 24
-                        Text { id: meta; x: 12; y: 8; color: root.cTert; font.pixelSize: 11
+                        Text { textFormat: Text.PlainText; id: meta; x: 12; y: 8; color: root.cTert; font.pixelSize: 11
                                text: m.role === "user" ? "You" : m.role === "error" ? "Error" : ("AI" + (m.model ? "  ·  " + m.model : "") + (m.privacy ? "  ·  " + (root.tierNames[m.privacy] || m.privacy) : "")) }
                         TextEdit { id: body; x: 12; y: meta.y + meta.implicitHeight + 4; width: parent.width - 24; readOnly: true; selectByMouse: true
                                    wrapMode: TextEdit.Wrap; color: root.cText; font.pixelSize: 14; text: m.content }
@@ -365,8 +367,8 @@ Item {
                 visible: root.page === "connectors" && !root.editPreset
                 ColumnLayout {
                     id: connCol; width: parent.width; spacing: 10
-                    Text { text: "Connectors"; color: root.cText; font.pixelSize: 18; font.bold: true }
-                    Text { Layout.fillWidth: true; wrapMode: Text.Wrap; color: root.cSec
+                    Text { textFormat: Text.PlainText; text: "Connectors"; color: root.cText; font.pixelSize: 18; font.bold: true }
+                    Text { textFormat: Text.PlainText; Layout.fillWidth: true; wrapMode: Text.Wrap; color: root.cSec
                            text: "Where your AI runs. Local runtimes keep everything on this computer; private providers promise more than usual, and the tier shows how much. Keys stay on this computer and only ever go to their own provider." }
                     Repeater {
                         model: root.connectorList
@@ -376,24 +378,24 @@ Item {
                             ColumnLayout {
                                 id: cc; x: 12; y: 10; width: parent.width - 24; spacing: 4
                                 RowLayout {
-                                    Text { text: modelData.name; color: root.cText; font.pixelSize: 15; font.bold: true }
+                                    Text { textFormat: Text.PlainText; text: modelData.name; color: root.cText; font.pixelSize: 15; font.bold: true }
                                     Rectangle { radius: 4; color: "transparent"; border.color: root.tierColor(modelData.privacy); implicitWidth: tl.implicitWidth + 10; implicitHeight: tl.implicitHeight + 4
-                                                Text { id: tl; anchors.centerIn: parent; text: modelData.privacyNote ? "Varies by model" : (root.tierNames[modelData.privacy] || modelData.privacy); color: root.tierColor(modelData.privacy); font.pixelSize: 11 } }
+                                                Text { textFormat: Text.PlainText; id: tl; anchors.centerIn: parent; text: modelData.privacyNote ? "Varies by model" : (root.tierNames[modelData.privacy] || modelData.privacy); color: root.tierColor(modelData.privacy); font.pixelSize: 11 } }
                                     ExperimentalBadge { visible: !!(root.presetById(modelData.preset) || {}).experimental }
                                     Item { Layout.fillWidth: true }
                                     Btn { text: "Test"; onClicked: root.call("testConnector", [modelData.id], function () { root.toast("Testing " + modelData.name + "…") }) }
                                     Btn { text: "Edit"; onClicked: { root.editId = modelData.id; root.editPreset = root.presetById(modelData.preset) } }
                                     Btn { danger: true; text: "Remove"; onClicked: root.call("removeConnector", [modelData.id], function () { root.refresh() }) }
                                 }
-                                Text { color: root.cSec; font.pixelSize: 12; text: modelData.baseUrl + (modelData.hasKey ? "  ·  key " + modelData.apiKey : "") }
-                                Text { color: modelData.error ? root.cBad : root.cGood; font.pixelSize: 12
+                                Text { textFormat: Text.PlainText; color: root.cSec; font.pixelSize: 12; text: modelData.baseUrl + (modelData.hasKey ? "  ·  key " + modelData.apiKey : "") }
+                                Text { textFormat: Text.PlainText; color: modelData.error ? root.cBad : root.cGood; font.pixelSize: 12
                                        text: modelData.error ? modelData.error : (modelData.models + " models available") }
-                                Text { visible: !!modelData.balance; color: root.cSec; font.pixelSize: 12
+                                Text { textFormat: Text.PlainText; visible: !!modelData.balance; color: root.cSec; font.pixelSize: 12
                                        text: { var b = modelData.balance || {}; var o = []; for (var k in b) o.push(k.replace("x-venice-balance-", "") + " " + b[k]); return "Balance: " + o.join(", ") } }
                             }
                         }
                     }
-                    Text { text: "Add a connector"; color: root.cText; font.pixelSize: 16; font.bold: true; Layout.topMargin: 10 }
+                    Text { textFormat: Text.PlainText; text: "Add a connector"; color: root.cText; font.pixelSize: 16; font.bold: true; Layout.topMargin: 10 }
                     GridLayout {
                         Layout.fillWidth: true; columns: 3; columnSpacing: 10; rowSpacing: 10
                         Repeater {
@@ -402,10 +404,10 @@ Item {
                                 Layout.fillWidth: true; Layout.preferredHeight: 104; radius: 8; color: root.cSurface; border.color: root.cBorder
                                 ColumnLayout {
                                     x: 10; y: 8; width: parent.width - 20; spacing: 2
-                                    Text { text: modelData.name; color: root.cText; font.bold: true; elide: Text.ElideRight; Layout.fillWidth: true }
-                                    Text { text: modelData.privacyNote || root.tierNames[modelData.privacy] || modelData.privacy; color: root.tierColor(modelData.privacy); font.pixelSize: 11; elide: Text.ElideRight; Layout.fillWidth: true }
+                                    Text { textFormat: Text.PlainText; text: modelData.name; color: root.cText; font.bold: true; elide: Text.ElideRight; Layout.fillWidth: true }
+                                    Text { textFormat: Text.PlainText; text: modelData.privacyNote || root.tierNames[modelData.privacy] || modelData.privacy; color: root.tierColor(modelData.privacy); font.pixelSize: 11; elide: Text.ElideRight; Layout.fillWidth: true }
                                     ExperimentalBadge { visible: !!modelData.experimental }
-                                    Text { text: modelData.blurb; color: root.cSec; font.pixelSize: 11; wrapMode: Text.Wrap; maximumLineCount: modelData.experimental ? 1 : 2; elide: Text.ElideRight; Layout.fillWidth: true }
+                                    Text { textFormat: Text.PlainText; text: modelData.blurb; color: root.cSec; font.pixelSize: 11; wrapMode: Text.Wrap; maximumLineCount: modelData.experimental ? 1 : 2; elide: Text.ElideRight; Layout.fillWidth: true }
                                 }
                                 MouseArea { anchors.fill: parent; cursorShape: Qt.PointingHandCursor; onClicked: { root.editId = ""; root.editPreset = modelData } }
                             }
@@ -423,35 +425,35 @@ Item {
                     property var p: root.editPreset || ({})
                     RowLayout {
                         Btn { text: "← Back"; onClicked: root.editPreset = null }
-                        Text { text: edCol.p.name || ""; color: root.cText; font.pixelSize: 18; font.bold: true }
+                        Text { textFormat: Text.PlainText; text: edCol.p.name || ""; color: root.cText; font.pixelSize: 18; font.bold: true }
                     }
-                    Text { Layout.fillWidth: true; wrapMode: Text.Wrap; color: root.cSec; text: edCol.p.blurb || "" }
+                    Text { textFormat: Text.PlainText; Layout.fillWidth: true; wrapMode: Text.Wrap; color: root.cSec; text: edCol.p.blurb || "" }
                     LogosNotice {
                         visible: !!edCol.p.experimental; Layout.fillWidth: true; severity: LogosNotice.Warning
                         title: "Experimental: report issues!"
                         message: "This connector follows the provider's documentation but hasn't been tried with a real key yet. If something doesn't work, please open an issue: " + root.issuesUrl
                     }
-                    Text { color: root.tierColor(edCol.p.privacy); text: "Privacy: " + (edCol.p.privacyNote || ((root.tierNames[edCol.p.privacy] || "") + " — " + (root.tierHelp[edCol.p.privacy] || ""))); wrapMode: Text.Wrap; Layout.fillWidth: true }
-                    Text { visible: (edCol.p.steps || []).length > 0; text: "How to set it up"; color: root.cText; font.bold: true; Layout.topMargin: 6 }
+                    Text { textFormat: Text.PlainText; color: root.tierColor(edCol.p.privacy); text: "Privacy: " + (edCol.p.privacyNote || ((root.tierNames[edCol.p.privacy] || "") + " — " + (root.tierHelp[edCol.p.privacy] || ""))); wrapMode: Text.Wrap; Layout.fillWidth: true }
+                    Text { textFormat: Text.PlainText; visible: (edCol.p.steps || []).length > 0; text: "How to set it up"; color: root.cText; font.bold: true; Layout.topMargin: 6 }
                     Repeater { model: edCol.p.steps || []
-                               delegate: Text { Layout.fillWidth: true; wrapMode: Text.Wrap; color: root.cText; text: (index + 1) + ". " + modelData } }
-                    Text { visible: (edCol.p.funding || []).length > 0; text: "Paying for it"; color: root.cText; font.bold: true; Layout.topMargin: 6 }
+                               delegate: Text { textFormat: Text.PlainText; Layout.fillWidth: true; wrapMode: Text.Wrap; color: root.cText; text: (index + 1) + ". " + modelData } }
+                    Text { textFormat: Text.PlainText; visible: (edCol.p.funding || []).length > 0; text: "Paying for it"; color: root.cText; font.bold: true; Layout.topMargin: 6 }
                     Repeater { model: edCol.p.funding || []
-                               delegate: Text { Layout.fillWidth: true; wrapMode: Text.Wrap; color: root.cSec; text: "• " + modelData } }
+                               delegate: Text { textFormat: Text.PlainText; Layout.fillWidth: true; wrapMode: Text.Wrap; color: root.cSec; text: "• " + modelData } }
                     Flow {
                         Layout.fillWidth: true; spacing: 6
                         Repeater {
                             model: Object.keys(edCol.p.links || {})
-                            delegate: Btn { text: modelData; onClicked: Qt.openUrlExternally(edCol.p.links[modelData]) }
+                            delegate: Btn { text: modelData; onClicked: { var u = String(edCol.p.links[modelData] || ""); if (/^https?:\/\//.test(u)) Qt.openUrlExternally(u) } }
                         }
                     }
-                    Text { text: "Base URL"; color: root.cSec; Layout.topMargin: 8 }
+                    Text { textFormat: Text.PlainText; text: "Base URL"; color: root.cSec; Layout.topMargin: 8 }
                     Field { id: edUrl; Layout.fillWidth: true; text: edCol.p.baseUrl || ""; placeholderText: "https://…/v1" }
-                    Text { text: edCol.p.needsKey ? "API key" : "API key (optional)"; color: root.cSec }
+                    Text { textFormat: Text.PlainText; text: edCol.p.needsKey ? "API key" : "API key (optional)"; color: root.cSec }
                     Field { id: edKey; Layout.fillWidth: true; echoMode: TextInput.Password; placeholderText: root.editId ? "leave empty to keep the stored key" : "paste the key" }
                     RowLayout {
                         visible: edCol.p.id === "custom"
-                        Text { text: "Privacy tier"; color: root.cSec }
+                        Text { textFormat: Text.PlainText; text: "Privacy tier"; color: root.cSec }
                         TierChips { id: edTier; Layout.fillWidth: true; onChosen: function (t) { value = t } }
                     }
                     RowLayout {
@@ -466,7 +468,8 @@ Item {
                                 root.call("saveConnector", [JSON.stringify(c)], function (r) {
                                     var v = root.parse(r)
                                     if (!v || !v.ok) { root.toast(v && v.error ? v.error : "couldn't save"); return }
-                                    root.toast("Saved - checking the models…"); root.editPreset = null; edKey.text = ""; root.refresh()
+                                    root.toast(v.keyCleared ? "Saved. The address moved, so the old key was forgotten: enter the key again." : "Saved - checking the models…")
+                                    root.editPreset = null; edKey.text = ""; root.refresh()
                                 })
                             }
                         }
@@ -480,35 +483,35 @@ Item {
                 visible: root.page === "apps"
                 ColumnLayout {
                     id: appCol; width: parent.width; spacing: 8
-                    Text { text: "Apps & usage"; color: root.cText; font.pixelSize: 18; font.bold: true }
-                    Text { Layout.fillWidth: true; wrapMode: Text.Wrap; color: root.cSec
+                    Text { textFormat: Text.PlainText; text: "Apps & usage"; color: root.cText; font.pixelSize: 18; font.bold: true }
+                    Text { textFormat: Text.PlainText; Layout.fillWidth: true; wrapMode: Text.Wrap; color: root.cSec
                            text: "Apps ask for AI with the ai.ask / ai.chat intents (you approve each request) or call the core directly. Names are what each app declares." }
                     Repeater {
                         model: Object.keys(root.usageObj.apps || {})
-                        delegate: Text { color: root.cText; property var u: root.usageObj.apps[modelData]
+                        delegate: Text { textFormat: Text.PlainText; color: root.cText; property var u: root.usageObj.apps[modelData]
                                          text: modelData + ": " + (u.requests || 0) + " requests, " + ((u.promptTokens || 0) + (u.completionTokens || 0)) + " tokens" }
                     }
-                    Text { text: "Open chats"; color: root.cText; font.bold: true; Layout.topMargin: 10 }
-                    Text { visible: root.sessionList.length === 0; color: root.cTert; font.pixelSize: 12; text: "None. An app opens one with the ai.session intent, once you allow it." }
+                    Text { textFormat: Text.PlainText; text: "Open chats"; color: root.cText; font.bold: true; Layout.topMargin: 10 }
+                    Text { textFormat: Text.PlainText; visible: root.sessionList.length === 0; color: root.cTert; font.pixelSize: 12; text: "None. An app opens one with the ai.session intent, once you allow it." }
                     Repeater {
                         model: root.sessionList
                         delegate: Rectangle {
                             Layout.fillWidth: true; implicitHeight: 52; radius: 8; color: root.cSurface; border.color: root.cBorder
                             Column {
                                 x: 12; anchors.verticalCenter: parent.verticalCenter; width: parent.width - 120
-                                Text { width: parent.width; elide: Text.ElideRight; color: root.cText; font.pixelSize: 13
+                                Text { textFormat: Text.PlainText; width: parent.width; elide: Text.ElideRight; color: root.cText; font.pixelSize: 13
                                        text: modelData.caller + "  \u00b7  \u201c" + (modelData.title || "untitled") + "\u201d" + (modelData.busy ? "  \u00b7  answering…" : "") }
-                                Text { width: parent.width; elide: Text.ElideRight; color: root.cTert; font.pixelSize: 11
+                                Text { textFormat: Text.PlainText; width: parent.width; elide: Text.ElideRight; color: root.cTert; font.pixelSize: 11
                                        text: modelData.model + "  \u00b7  " + modelData.turns + " turns  \u00b7  document " + Math.round((modelData.documentChars || 0) / 1000) + " k chars" }
                             }
                             Btn { anchors.right: parent.right; anchors.rightMargin: 10; anchors.verticalCenter: parent.verticalCenter; danger: true; text: "End"
-                                  onClicked: root.call("closeSession", [modelData.id], function () { root.refresh() }) }
+                                  onClicked: root.call("closeSession", [modelData.handle], function () { root.refresh() }) }
                         }
                     }
-                    Text { text: "By connector"; color: root.cText; font.bold: true; Layout.topMargin: 10 }
+                    Text { textFormat: Text.PlainText; text: "By connector"; color: root.cText; font.bold: true; Layout.topMargin: 10 }
                     Repeater {
                         model: Object.keys(root.usageObj.connectors || {})
-                        delegate: Text { color: root.cSec; property var u: root.usageObj.connectors[modelData]
+                        delegate: Text { textFormat: Text.PlainText; color: root.cSec; property var u: root.usageObj.connectors[modelData]
                                          text: modelData + ": " + (u.requests || 0) + " requests, " + ((u.promptTokens || 0) + (u.completionTokens || 0)) + " tokens" }
                     }
                 }
@@ -520,22 +523,22 @@ Item {
                 visible: root.page === "settings"
                 ColumnLayout {
                     id: setCol; width: Math.min(parent.width, 720); spacing: 8
-                    Text { text: "Settings"; color: root.cText; font.pixelSize: 18; font.bold: true }
-                    Text { text: "Least private tier any app may use"; color: root.cSec }
+                    Text { textFormat: Text.PlainText; text: "Settings"; color: root.cText; font.pixelSize: 18; font.bold: true }
+                    Text { textFormat: Text.PlainText; text: "Least private tier any app may use"; color: root.cSec }
                     TierChips {
                         Layout.fillWidth: true; value: root.settingsObj.minPrivacy || "standard"
                         onChosen: function (t) { root.call("setSettings", [JSON.stringify({ minPrivacy: t })], function () { root.refresh() }) }
                     }
-                    Text { Layout.fillWidth: true; wrapMode: Text.Wrap; color: root.cTert; font.pixelSize: 12; text: root.tierHelp[root.settingsObj.minPrivacy || "standard"] || "" }
-                    Text { text: "Default model"; color: root.cSec; Layout.topMargin: 8 }
+                    Text { textFormat: Text.PlainText; Layout.fillWidth: true; wrapMode: Text.Wrap; color: root.cTert; font.pixelSize: 12; text: root.tierHelp[root.settingsObj.minPrivacy || "standard"] || "" }
+                    Text { textFormat: Text.PlainText; text: "Default model"; color: root.cSec; Layout.topMargin: 8 }
                     ModelPicker {
                         Layout.preferredWidth: 460; noneLabel: "The most private model available"
                         models: root.modelList; pinned: root.pinnedList(); current: root.settingsObj.defaultModel || ""
                         onPicked: function (id) { root.call("setSettings", [JSON.stringify({ defaultModel: id })], function () { root.refresh() }) }
                         onPinToggled: function (id) { root.togglePin(id) }
                     }
-                    Text { text: "Local OpenAI endpoint"; color: root.cText; font.bold: true; Layout.topMargin: 14 }
-                    Text { Layout.fillWidth: true; wrapMode: Text.Wrap; color: root.cSec; font.pixelSize: 12
+                    Text { textFormat: Text.PlainText; text: "Local OpenAI endpoint"; color: root.cText; font.bold: true; Layout.topMargin: 14 }
+                    Text { textFormat: Text.PlainText; Layout.fillWidth: true; wrapMode: Text.Wrap; color: root.cSec; font.pixelSize: 12
                            text: "Lets tools outside Basecamp (editors, agents, scripts) use these models as an OpenAI endpoint on this computer only (127.0.0.1), with the token below." }
                     LogosSwitch {
                         text: "Enabled"; checked: !!root.serverObj.enabled
@@ -558,9 +561,9 @@ Item {
                 visible: root.page === "intent"
                 ColumnLayout {
                     id: inCol; width: Math.min(parent.width, 760); spacing: 8
-                    Text { Layout.fillWidth: true; wrapMode: Text.Wrap; color: root.cText; font.pixelSize: 18; font.bold: true
+                    Text { textFormat: Text.PlainText; Layout.fillWidth: true; wrapMode: Text.Wrap; color: root.cText; font.pixelSize: 18; font.bold: true
                            text: root.intentName === "ai.session" ? root.intentFrom + " wants to chat with AI about \u201c" + (root.intentParams.title || "") + "\u201d" : root.intentFrom + " asks AI" }
-                    Text { Layout.fillWidth: true; wrapMode: Text.Wrap; color: root.cSec
+                    Text { textFormat: Text.PlainText; Layout.fillWidth: true; wrapMode: Text.Wrap; color: root.cSec
                            text: root.intentName === "ai.session"
                                  ? (root.intentParams.purpose ? String(root.intentParams.purpose) + "\n\n" : "") + "If you allow it, every message " + root.intentFrom + " sends in this chat goes to the model you choose here without asking again, until the app or you end it (Apps & usage). This is what it starts with:"
                                  : "This is exactly what will be sent to the model you choose. Nothing is sent until you press Run." }
@@ -571,9 +574,9 @@ Item {
                             TextEdit { id: prev; width: parent.width; readOnly: true; selectByMouse: true; wrapMode: TextEdit.Wrap; color: root.cText; font.pixelSize: 13
                                        text: root.intentMessages().map(function (m) { return "[" + m.role + "] " + (typeof m.content === "string" ? m.content : JSON.stringify(m.content)) }).join("\n\n") } }
                     }
-                    Text { color: root.cSec; text: "The app asks for at least: " + (root.tierNames[root.intentFloor()] || root.intentFloor()) }
+                    Text { textFormat: Text.PlainText; color: root.cSec; text: "The app asks for at least: " + (root.tierNames[root.intentFloor()] || root.intentFloor()) }
                     RowLayout {
-                        Text { text: "Model"; color: root.cSec }
+                        Text { textFormat: Text.PlainText; text: "Model"; color: root.cSec }
                         ModelPicker {
                             Layout.preferredWidth: 460; enabled: root.intentState === "ask"
                             models: root.modelsAtLeast(root.intentFloor()); pinned: root.pinnedList(); current: root.intentModel
@@ -581,14 +584,14 @@ Item {
                             onPinToggled: function (id) { root.togglePin(id) }
                         }
                     }
-                    Text { visible: root.modelsAtLeast(root.intentFloor()).length === 0; color: root.cBad; wrapMode: Text.Wrap; Layout.fillWidth: true
+                    Text { textFormat: Text.PlainText; visible: root.modelsAtLeast(root.intentFloor()).length === 0; color: root.cBad; wrapMode: Text.Wrap; Layout.fillWidth: true
                            text: "No model you have set up is private enough for this request. Add a local runtime or a TEE provider in Connectors." }
                     RowLayout {
                         visible: root.intentState === "ask"
                         Btn { primary: true; text: root.intentName === "ai.session" ? "Allow this chat" : "Run"; enabled: !!root.intentModel; onClicked: root.runIntent() }
                         Btn { text: "Decline"; onClicked: root.declineIntent() }
                     }
-                    Text { visible: root.intentState !== "ask" && root.intentState !== ""; text: root.intentState === "running" ? "Answering…" : root.intentState === "done" ? (root.intentName === "ai.session" ? "Chat allowed" : "Answer sent back to " + root.intentFrom) : "Failed"; color: root.intentState === "error" ? root.cBad : root.cSec }
+                    Text { textFormat: Text.PlainText; visible: root.intentState !== "ask" && root.intentState !== ""; text: root.intentState === "running" ? "Answering…" : root.intentState === "done" ? (root.intentName === "ai.session" ? "Chat allowed" : "Answer sent back to " + root.intentFrom) : "Failed"; color: root.intentState === "error" ? root.cBad : root.cSec }
                     TextEdit { visible: root.intentAnswer !== ""; Layout.fillWidth: true; readOnly: true; selectByMouse: true; wrapMode: TextEdit.Wrap; color: root.cText; font.pixelSize: 14; text: root.intentAnswer }
                     Btn { visible: root.intentState === "running"; text: "Stop"; onClicked: root.declineIntent() }
                     Btn { visible: root.intentState === "done" || root.intentState === "error"; text: "Close"; onClicked: { root.intentState = ""; root.page = "chat" } }
@@ -626,7 +629,7 @@ Item {
                 property bool on: tc.value === modelData[0]
                 width: ct.implicitWidth + 22; height: 28; radius: 14
                 color: on ? Theme.palette.surfaceRaised : Theme.palette.backgroundSecondary; border.color: on ? Theme.palette.primary : Theme.palette.border
-                Text { id: ct; anchors.centerIn: parent; text: modelData[1]; font.pixelSize: 12; color: parent.on ? Theme.palette.text : Theme.palette.textSecondary }
+                Text { textFormat: Text.PlainText; id: ct; anchors.centerIn: parent; text: modelData[1]; font.pixelSize: 12; color: parent.on ? Theme.palette.text : Theme.palette.textSecondary }
                 MouseArea { anchors.fill: parent; cursorShape: Qt.PointingHandCursor; onClicked: tc.chosen(modelData[0]) }
             }
         }
@@ -663,10 +666,10 @@ Item {
         Row {
             anchors.verticalCenter: parent.verticalCenter; x: 10; spacing: 8; width: parent.width - 40; clip: true
             Rectangle { visible: !!mp.cur; anchors.verticalCenter: parent.verticalCenter; width: 8; height: 8; radius: 4; color: mp.tierColor(mp.cur ? mp.cur.privacy : "") }
-            Text { anchors.verticalCenter: parent.verticalCenter; color: mp.cur || mp.noneLabel ? Theme.palette.text : Theme.palette.textTertiary; font.pixelSize: 13; elide: Text.ElideRight; width: parent.width - 16
+            Text { textFormat: Text.PlainText; anchors.verticalCenter: parent.verticalCenter; color: mp.cur || mp.noneLabel ? Theme.palette.text : Theme.palette.textTertiary; font.pixelSize: 13; elide: Text.ElideRight; width: parent.width - 16
                    text: mp.cur ? mp.cur.name + "   " + mp.cur.connectorName + " · " + mp.tierName(mp.cur.privacy) : (mp.noneLabel || (mp.models.length ? "Choose a model" : "No models")) }
         }
-        Text { anchors.right: parent.right; anchors.rightMargin: 10; anchors.verticalCenter: parent.verticalCenter; text: "▾"; color: Theme.palette.textSecondary }
+        Text { textFormat: Text.PlainText; anchors.right: parent.right; anchors.rightMargin: 10; anchors.verticalCenter: parent.verticalCenter; text: "▾"; color: Theme.palette.textSecondary }
         MouseArea { id: pma; anchors.fill: parent; hoverEnabled: true; cursorShape: Qt.PointingHandCursor
                     onClicked: if (mp.enabled) mp.openList() }
         Popup {
@@ -685,14 +688,14 @@ Item {
                     Keys.onEscapePressed: pop.close()
                     onSubmitted: pop.choose(pop.shown[list.currentIndex >= 0 ? list.currentIndex : pop.firstModel(0, 1)])
                 }
-                Text { visible: pop.shown.length === 0; text: "No model matches."; color: Theme.palette.textTertiary; font.pixelSize: 12; Layout.leftMargin: 4 }
+                Text { textFormat: Text.PlainText; visible: pop.shown.length === 0; text: "No model matches."; color: Theme.palette.textTertiary; font.pixelSize: 12; Layout.leftMargin: 4 }
                 ListView {
                     id: list; Layout.fillWidth: true; Layout.fillHeight: true; clip: true; model: pop.shown
                     ScrollBar.vertical: ScrollBar {}
                     delegate: Item {
                         property var r: modelData
                         width: list.width; height: r.header ? 26 : 38
-                        Text { visible: !!r.header; text: r.header || ""; color: Theme.palette.textTertiary; font.pixelSize: 11; font.bold: true; x: 8; anchors.bottom: parent.bottom; anchors.bottomMargin: 4 }
+                        Text { textFormat: Text.PlainText; visible: !!r.header; text: r.header || ""; color: Theme.palette.textTertiary; font.pixelSize: 11; font.bold: true; x: 8; anchors.bottom: parent.bottom; anchors.bottomMargin: 4 }
                         Rectangle {
                             visible: !r.header; anchors.fill: parent; radius: 6
                             color: index === list.currentIndex || rma.containsMouse ? Theme.palette.surfaceRaised : ((r.none ? "" === mp.current : r.id === mp.current) ? Theme.palette.backgroundSecondary : "transparent")
@@ -700,10 +703,10 @@ Item {
                             Rectangle { visible: !r.none; x: 10; anchors.verticalCenter: parent.verticalCenter; width: 8; height: 8; radius: 4; color: mp.tierColor(r.privacy) }
                             Column {
                                 x: 26; anchors.verticalCenter: parent.verticalCenter; width: parent.width - 26 - 40
-                                Text { text: r.none ? mp.noneLabel : (r.name || ""); color: Theme.palette.text; font.pixelSize: 13; elide: Text.ElideRight; width: parent.width }
-                                Text { visible: !r.none; text: (r.connectorName || "") + " · " + mp.tierName(r.privacy) + (r.name !== r.id ? " · " + r.id : ""); color: Theme.palette.textTertiary; font.pixelSize: 11; elide: Text.ElideRight; width: parent.width }
+                                Text { textFormat: Text.PlainText; text: r.none ? mp.noneLabel : (r.name || ""); color: Theme.palette.text; font.pixelSize: 13; elide: Text.ElideRight; width: parent.width }
+                                Text { textFormat: Text.PlainText; visible: !r.none; text: (r.connectorName || "") + " · " + mp.tierName(r.privacy) + (r.name !== r.id ? " · " + r.id : ""); color: Theme.palette.textTertiary; font.pixelSize: 11; elide: Text.ElideRight; width: parent.width }
                             }
-                            Text {
+                            Text { textFormat: Text.PlainText;
                                 visible: !r.none; anchors.right: parent.right; anchors.rightMargin: 12; anchors.verticalCenter: parent.verticalCenter
                                 property bool on: mp.pinned.indexOf(r.id) >= 0
                                 text: on ? "★" : "☆"; font.pixelSize: 17; color: on ? Theme.palette.warning : (sma.containsMouse ? Theme.palette.text : Theme.palette.textTertiary)
@@ -712,7 +715,7 @@ Item {
                         }
                     }
                 }
-                Text { text: "★ pins a model to the top of every list.  ↑↓ Enter to pick."; color: Theme.palette.textTertiary; font.pixelSize: 11; Layout.leftMargin: 4 }
+                Text { textFormat: Text.PlainText; text: "★ pins a model to the top of every list.  ↑↓ Enter to pick."; color: Theme.palette.textTertiary; font.pixelSize: 11; Layout.leftMargin: 4 }
             }
         }
     }
@@ -722,6 +725,6 @@ Item {
         anchors.bottom: parent.bottom; anchors.horizontalCenter: parent.horizontalCenter; anchors.bottomMargin: 20
         radius: 6; color: root.cRaised; border.color: root.cBorder
         width: toastText.implicitWidth + 24; height: toastText.implicitHeight + 14
-        Text { id: toastText; anchors.centerIn: parent; text: root.toastMsg; color: root.cText }
+        Text { textFormat: Text.PlainText; id: toastText; anchors.centerIn: parent; text: root.toastMsg; color: root.cText }
     }
 }

@@ -51,6 +51,13 @@ class H(BaseHTTPRequestHandler):
             msg = {"role": "assistant", "content": None, "tool_calls": [{"id": "c1", "type": "function", "function": {"name": "f", "arguments": "{}"}}]}
             b = json.dumps({"id": "x", "object": "chat.completion", "choices": [{"index": 0, "message": msg, "finish_reason": "tool_calls"}], "usage": usage}).encode()
             self.send_response(200); self.send_header("Content-Type", "application/json"); self.send_header("Content-Length", str(len(b))); self.end_headers(); self.wfile.write(b); return
+        if last == "bad-usage":   # a hostile provider: token counts that aren't numbers
+            usage = {"prompt_tokens": "lots", "completion_tokens": [1], "total_tokens": None}
+            want_usage = True
+        if last == "cutoff" and req.get("stream"):   # the stream stops mid-answer: no finish_reason, no [DONE]
+            self.send_response(200); self.send_header("Content-Type", "text/event-stream"); self.end_headers()
+            ch = {"id": "x", "object": "chat.completion.chunk", "choices": [{"index": 0, "delta": {"content": "half an ans"}, "finish_reason": None}]}
+            self.wfile.write(("data: " + json.dumps(ch) + "\n\n").encode()); self.wfile.flush(); return
         if req.get("stream"):
             self.send_response(200); self.send_header("Content-Type", "text/event-stream"); self.end_headers()
             for i in range(0, len(reply), 4):
