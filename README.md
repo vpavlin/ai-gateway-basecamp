@@ -9,7 +9,8 @@ labelled.
 - **`ai_gateway`** (view): chat, connector onboarding, settings, and the **`ai.ask` / `ai.chat`
   intents** other apps call.
 
-Status: **core 0.1.3, view 0.1.5**. Source: https://github.com/vpavlin/ai-gateway-basecamp. Issues: https://github.com/vpavlin/ai-gateway-basecamp/issues Not yet in any package repository. Design: `docs/adr/0001-architecture.md`;
+Status: **core 0.1.3, view 0.1.5**. Source: https://github.com/vpavlin/ai-gateway-basecamp. Issues: https://github.com/vpavlin/ai-gateway-basecamp/issues
+Design: `docs/adr/0001-architecture.md`;
 research: `docs/research-providers.md`, `docs/research-private-relay.md`; open questions:
 `QUESTIONS.md`.
 
@@ -100,5 +101,6 @@ scripts/test.sh                                   # core vs a fake provider + th
   - the core in a real `logosctl` runtime (HTTPS to Venice, a streamed job, and `jobUpdate` events
     as `{arg0, arg1}`);
   - the view in the render harness (an intent round trip and the event path).
-- Not yet: Basecamp GUI with a real provider key, and arm64/darwin builds (that needs a GitHub repo
-  for CI).
+  - the Basecamp GUI with Venice, and Fileverse's ai.ask / ai.session integration in Basecamp 0.3.2.
+- linux-arm64 and darwin-arm64 are built by GitHub Actions (tags `arm64-*`, `darwin-*`) and merged into one
+  `.lgx` per module.
