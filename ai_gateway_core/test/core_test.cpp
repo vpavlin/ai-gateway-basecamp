@@ -95,7 +95,14 @@ int main(int argc, char** argv) {
     CHECK(waitUntil([&] { return J(core.job(jid)).value("state", "") == "done"; }, 8000), "the job finishes");
     json jr = J(core.job(jid));
     CHECK(jr.value("text", "") == "echo: hello world, stream me", "streamed text assembled: " + jr.value("text", std::string()));
-    CHECK(jr.contains("usage") && jr["usage"].value("completion_tokens", 0) == 7, "usage from the stream's last chunk");
+    CHECK(jr.contains("usage") && jr["usage"].value("completion_tokens", 0) == 7, "a stream asks for usage (stream_options.include_usage) and gets it");
+    {
+        json rj = J(core.chat("tester", R"({"model":"venice/echo","messages":[{"role":"user","content":"reject-stream-options"}]})"));
+        const std::string rid = rj.value("jobId", "");
+        waitUntil([&] { return J(core.job(rid)).value("state", "") != "running"; }, 8000);
+        json rr = J(core.job(rid));
+        CHECK(rr.value("state", "") == "done" && rr.value("text", "") == "echo: reject-stream-options", "a server that refuses stream_options is retried without it: " + rr.value("state", std::string()) + " " + rr.value("error", std::string()));
+    }
     int deltas = 0; std::string joined;
     for (auto& u : g_updates) if (u.first == jid && u.second.contains("delta")) { deltas++; joined += u.second["delta"].get<std::string>(); }
     CHECK(deltas >= 1 && joined == "echo: hello world, stream me", "jobUpdate events carry the deltas (" + std::to_string(deltas) + ")");

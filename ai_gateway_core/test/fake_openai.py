@@ -42,6 +42,11 @@ class H(BaseHTTPRequestHandler):
             doc = sysmsg.split("<<<\n", 1)[1].split("\n>>>", 1)[0] if "<<<\n" in sysmsg else ""
             reply = "roles=" + ",".join(m.get("role", "") for m in msgs) + " doc=" + doc
         usage = {"prompt_tokens": 5, "completion_tokens": 7, "total_tokens": 12}
+        # like OpenAI/Ollama: a stream reports usage only when asked with stream_options.include_usage
+        want_usage = bool((req.get("stream_options") or {}).get("include_usage"))
+        if last == "reject-stream-options" and "stream_options" in req:   # an older server that refuses the field
+            self.send_response(400); self.send_header("Content-Type", "application/json"); self.end_headers()
+            self.wfile.write(b'{"error":{"message":"unknown field stream_options"}}'); return
         if req.get("tools"):
             msg = {"role": "assistant", "content": None, "tool_calls": [{"id": "c1", "type": "function", "function": {"name": "f", "arguments": "{}"}}]}
             b = json.dumps({"id": "x", "object": "chat.completion", "choices": [{"index": 0, "message": msg, "finish_reason": "tool_calls"}], "usage": usage}).encode()
@@ -51,8 +56,11 @@ class H(BaseHTTPRequestHandler):
             for i in range(0, len(reply), 4):
                 ch = {"id": "x", "object": "chat.completion.chunk", "choices": [{"index": 0, "delta": {"content": reply[i:i+4]}, "finish_reason": None}]}
                 self.wfile.write(("data: " + json.dumps(ch) + "\n\n").encode()); self.wfile.flush(); time.sleep(0.01)
-            end = {"id": "x", "object": "chat.completion.chunk", "choices": [{"index": 0, "delta": {}, "finish_reason": "stop"}], "usage": usage}
-            self.wfile.write(("data: " + json.dumps(end) + "\n\ndata: [DONE]\n\n").encode())
+            end = {"id": "x", "object": "chat.completion.chunk", "choices": [{"index": 0, "delta": {}, "finish_reason": "stop"}]}
+            self.wfile.write(("data: " + json.dumps(end) + "\n\n").encode())
+            if want_usage:   # OpenAI's shape: one more chunk with empty choices and the usage
+                self.wfile.write(("data: " + json.dumps({"id": "x", "object": "chat.completion.chunk", "choices": [], "usage": usage}) + "\n\n").encode())
+            self.wfile.write(b"data: [DONE]\n\n")
         else:
             b = json.dumps({"id": "x", "object": "chat.completion", "choices": [{"index": 0, "message": {"role": "assistant", "content": reply}, "finish_reason": "stop"}], "usage": usage}).encode()
             self.send_response(200); self.send_header("Content-Type", "application/json"); self.send_header("Content-Length", str(len(b))); self.end_headers(); self.wfile.write(b)

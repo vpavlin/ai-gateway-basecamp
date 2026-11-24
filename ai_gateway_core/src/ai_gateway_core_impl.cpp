@@ -95,6 +95,7 @@ struct AiGatewayCoreImpl::Job {
     std::string id, caller, kind, connector, model, upstreamModel, privacy, state = "running", text, error;
     json message = json();   // the assistant message (non-streamed: tool calls)
     json usage = json();
+    bool usageAsked = false;   // stream_options.include_usage was added (dropped once if the provider refuses it)
     json result = json();    // test jobs: the connector's model list
     bool stream = true;
     std::string sseBuf;
@@ -430,6 +431,12 @@ json AiGatewayCoreImpl::startChat(const std::string& caller0, const json& req0, 
     body["model"] = j->upstreamModel;
     j->stream = !(body.contains("tools") && body["tools"].is_array() && !body["tools"].empty());
     body["stream"] = j->stream;
+    // streams report token usage only when asked (OpenAI, Ollama, ...): ask, unless the caller already set it
+    if (j->stream && !(body.contains("stream_options") && body["stream_options"].is_object() && body["stream_options"].contains("include_usage"))) {
+        if (!body.contains("stream_options") || !body["stream_options"].is_object()) body["stream_options"] = json::object();
+        body["stream_options"]["include_usage"] = true;
+        j->usageAsked = true;
+    }
     m_jobs[j->id] = j;
     // usage: count the request now (tokens come with the answer)
     json& a = m_usage["apps"][caller];
@@ -462,12 +469,24 @@ void AiGatewayCoreImpl::runChat(std::shared_ptr<Job> j, json body) {
         if (!j->stream || status >= 400) return;   // read whole at the end
         onChunk(j, r->readAll().toStdString());
     });
-    QObject::connect(r, &QNetworkReply::finished, m_anchor, [this, j, r] {
+    QObject::connect(r, &QNetworkReply::finished, m_anchor, [this, j, r, body] {
         r->deleteLater();
         const int status = r->attribute(QNetworkRequest::HttpStatusCodeAttribute).toInt();
         const std::string rest = r->readAll().toStdString();
         { std::lock_guard<std::recursive_mutex> lk(m_mtx); j->reply = nullptr; if (j->state != "running") return; }
         if (r->error() == QNetworkReply::OperationCanceledError) { finishJob(j, "cancelled", ""); return; }
+        // an older server that refuses stream_options: try once more without it (usage is then unknown)
+        if ((status == 400 || status == 422) && j->usageAsked && j->text.empty()) {
+            j->usageAsked = false;
+            json again = body;
+            if (again.contains("stream_options") && again["stream_options"].is_object()) {
+                again["stream_options"].erase("include_usage");
+                if (again["stream_options"].empty()) again.erase("stream_options");
+            }
+            fprintf(stderr, "[aigw] %s refused stream_options (HTTP %d); retrying without\n", j->connector.c_str(), status);
+            runChat(j, again);
+            return;
+        }
         if (status >= 400 || (r->error() != QNetworkReply::NoError && status == 0)) {
             std::string msg;
             try { const json e = json::parse(rest); if (e.contains("error")) msg = e["error"].is_object() ? jstr(e["error"], "message") : (e["error"].is_string() ? e["error"].get<std::string>() : ""); } catch (...) {}
