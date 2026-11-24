@@ -9,7 +9,7 @@ labelled.
 - **`ai_gateway`** (view): chat, connector onboarding, settings, and the **`ai.ask` / `ai.chat`
   intents** other apps call.
 
-Status: **core 0.1.2, view 0.1.3** (amd64 test builds on the LAN repo). Not yet in any package repository. Design: `docs/adr/0001-architecture.md`;
+Status: **core 0.1.3, view 0.1.5**. Source: https://github.com/vpavlin/ai-gateway-basecamp. Issues: https://github.com/vpavlin/ai-gateway-basecamp/issues Not yet in any package repository. Design: `docs/adr/0001-architecture.md`;
 research: `docs/research-providers.md`, `docs/research-private-relay.md`; open questions:
 `QUESTIONS.md`.
 
@@ -24,6 +24,10 @@ research: `docs/research-providers.md`, `docs/research-private-relay.md`; open q
 | Morpheus | api.mor.org | Standard |
 | AkashML | api.akashml.com | Standard |
 | Custom | any OpenAI-compatible URL | the user declares it |
+
+**Tested with real accounts:** Venice and Ollama. The others (llama.cpp, LM Studio, NEAR AI, nilAI,
+Morpheus, AkashML) follow each provider's documentation and are marked **Experimental: report issues!** in
+the app until someone has tried them. Please do, and open an issue with what happened.
 
 Tiers, worst to best: `standard` < `no-retention` < `tee` < `tee-e2ee` < `local`.
 - TEE tiers are the provider's claim. Attestation checks come later.

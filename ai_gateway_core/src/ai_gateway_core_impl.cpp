@@ -31,7 +31,7 @@
 using json = nlohmann::json;
 
 namespace {
-const char* kVersion = "0.1.2";
+const char* kVersion = "0.1.3";
 
 long long nowMs() {
     return std::chrono::duration_cast<std::chrono::milliseconds>(std::chrono::system_clock::now().time_since_epoch()).count();

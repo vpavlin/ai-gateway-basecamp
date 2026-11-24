@@ -9,6 +9,8 @@
 //   standardPrefixes model ids proxied elsewhere (no better than standard whatever the provider is)
 //   skipPrefixes     model ids this version can't use (e.g. E2EE-only models: needs the E2EE protocol)
 //   nameField        a /models field to show instead of the id (Morpheus ids are hex addresses)
+//   experimental     built from the provider's docs but not yet tried with a real key: the view says so
+//                    and asks for issue reports
 namespace aigw {
 inline const char* kPresets = R"json([
   {
@@ -19,14 +21,14 @@ inline const char* kPresets = R"json([
     "steps": ["Install Ollama from ollama.com/download and start it.", "Download a model, e.g. `ollama pull llama3.2` or `ollama pull qwen3`.", "Press Test: the models you pulled appear here."]
   },
   {
-    "id": "llamacpp", "name": "llama.cpp server (this computer)", "kind": "local",
+    "id": "llamacpp", "experimental": true, "name": "llama.cpp server (this computer)", "kind": "local",
     "baseUrl": "http://127.0.0.1:8080/v1", "needsKey": false, "privacy": "local",
     "blurb": "llama.cpp's llama-server running a GGUF model locally.",
     "links": { "home": "https://github.com/ggml-org/llama.cpp/tree/master/tools/server" },
     "steps": ["Start `llama-server -m your-model.gguf` (port 8080).", "Press Test."]
   },
   {
-    "id": "lmstudio", "name": "LM Studio (this computer)", "kind": "local",
+    "id": "lmstudio", "experimental": true, "name": "LM Studio (this computer)", "kind": "local",
     "baseUrl": "http://localhost:1234/v1", "needsKey": false, "privacy": "local",
     "blurb": "LM Studio's local server.",
     "links": { "home": "https://lmstudio.ai", "docs": "https://lmstudio.ai/docs/app/api/endpoints/openai" },
@@ -43,7 +45,7 @@ inline const char* kPresets = R"json([
     "steps": ["Create an account at venice.ai.", "Add credit, or stake VVV for DIEM (daily allowance).", "Settings -> API: create an INFERENCE key (tip: limit it to private models and set a spend cap).", "Paste the key here and press Test."]
   },
   {
-    "id": "nearai", "name": "NEAR AI Cloud", "kind": "private",
+    "id": "nearai", "experimental": true, "name": "NEAR AI Cloud", "kind": "private",
     "baseUrl": "https://cloud-api.near.ai/v1", "needsKey": true, "privacy": "tee",
     "standardPrefixes": ["openai/", "anthropic/", "google/", "gpt-", "claude", "gemini"], "privacyNote": "TEE for open models; standard for proxied OpenAI/Anthropic/Google ones",
     "blurb": "Open models run in confidential computing (Intel TDX + NVIDIA H200) behind a gateway that also runs in a TEE; attestation is public. Proxied frontier models (OpenAI, Anthropic, Google) are only as private as their provider.",
@@ -52,7 +54,7 @@ inline const char* kPresets = R"json([
     "steps": ["Sign in at cloud.near.ai.", "Buy credits, or stake NEAR for inference credits.", "Create an API key in the dashboard.", "Paste it here and press Test."]
   },
   {
-    "id": "nilai", "name": "Nillion nilAI", "kind": "private",
+    "id": "nilai", "experimental": true, "name": "Nillion nilAI", "kind": "private",
     "baseUrl": "https://api.nilai.nillion.network/v1", "needsKey": true, "privacy": "tee",
     "blurb": "Models run in a TEE with NVIDIA confidential computing; every answer is signed. Few models.",
     "links": { "home": "https://nillion.com", "signup": "https://developer.nillion.com/nilai", "docs": "https://docs.nillion.com/blind-computer/build/llms/overview" },
@@ -60,7 +62,7 @@ inline const char* kPresets = R"json([
     "steps": ["Open the Nillion developer portal and create an account.", "Buy credits and create a nilAI API key.", "Paste it here and press Test."]
   },
   {
-    "id": "morpheus", "name": "Morpheus", "kind": "decentralised",
+    "id": "morpheus", "experimental": true, "name": "Morpheus", "kind": "decentralised",
     "baseUrl": "https://api.mor.org/api/v1", "needsKey": true, "privacy": "standard", "nameField": "name",
     "blurb": "A gateway to the Morpheus inference marketplace (independent providers). No privacy claims at the gateway yet.",
     "links": { "home": "https://mor.org", "signup": "https://app.mor.org", "docs": "https://apidocs.mor.org", "credits": "https://apidocs.mor.org/documentation/getting-started/credits.md" },
@@ -68,7 +70,7 @@ inline const char* kPresets = R"json([
     "steps": ["Create an account at app.mor.org.", "Buy credits or stake MOR; turn on automation.", "Create an API key (shown once).", "Paste it here and press Test."]
   },
   {
-    "id": "akashml", "name": "AkashML (Akash)", "kind": "decentralised",
+    "id": "akashml", "experimental": true, "name": "AkashML (Akash)", "kind": "decentralised",
     "baseUrl": "https://api.akashml.com/v1", "needsKey": true, "privacy": "standard",
     "blurb": "Open models on Akash's decentralised GPU cloud. No privacy claims. (Replaces the Akash Chat API.)",
     "links": { "home": "https://akashml.com", "docs": "https://akashml.com/docs", "pricing": "https://akashml.com/docs/guides/pricing" },

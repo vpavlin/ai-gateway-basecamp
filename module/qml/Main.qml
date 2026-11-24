@@ -1,7 +1,8 @@
 import QtQuick
 import QtQuick.Controls
 import QtQuick.Layouts
-// The host requires these imports for custom colours to apply; the view styles with its own palette.
+// The Logos design system (bundled by Basecamp): its theme and controls. Only components Basecamp 0.3.2
+// ships are used (tests render against the design system as of that release).
 import Logos.Theme
 import Logos.Controls
 
@@ -12,18 +13,19 @@ Item {
     id: root
     anchors.fill: parent
 
-    // ── palette ──
-    readonly property color cBg: "#0f1115"
-    readonly property color cSurface: "#171a21"
-    readonly property color cRaised: "#1f232c"
-    readonly property color cBorder: "#2b303b"
-    readonly property color cText: "#e6e8ee"
-    readonly property color cSec: "#a3a9b8"
-    readonly property color cTert: "#6d7486"
-    readonly property color cAccent: "#7c9cff"
-    readonly property color cGood: "#4fc28a"
-    readonly property color cWarn: "#e6b450"
-    readonly property color cBad: "#e66a6a"
+    // ── palette: the Logos design system's theme (dark in Basecamp) ──
+    readonly property color cBg: Theme.palette.background
+    readonly property color cSurface: Theme.palette.backgroundSecondary
+    readonly property color cRaised: Theme.palette.surface
+    readonly property color cBorder: Theme.palette.border
+    readonly property color cText: Theme.palette.text
+    readonly property color cSec: Theme.palette.textSecondary
+    readonly property color cTert: Theme.palette.textTertiary
+    readonly property color cAccent: Theme.palette.primary
+    readonly property color cGood: Theme.palette.success
+    readonly property color cWarn: Theme.palette.warning
+    readonly property color cBad: Theme.palette.error
+    readonly property string issuesUrl: "https://github.com/vpavlin/ai-gateway-basecamp/issues"
 
     // ── state ──
     property string page: "chat"
@@ -62,7 +64,7 @@ Item {
         "local": "Runs on this computer; nothing leaves it."
     })
     readonly property var tierOrder: ["standard", "no-retention", "tee", "tee-e2ee", "local"]
-    function tierColor(t) { return t === "local" ? cGood : (t === "tee" || t === "tee-e2ee") ? cAccent : t === "no-retention" ? cWarn : cTert }
+    function tierColor(t) { return t === "local" ? cGood : (t === "tee" || t === "tee-e2ee") ? Theme.palette.info : t === "no-retention" ? cWarn : cTert }
     function tierRank(t) { return tierOrder.indexOf(t) }
 
     // ── core calls ──
@@ -327,7 +329,7 @@ Item {
                     delegate: Rectangle {
                         property var m: index < root.chatMessages.length ? root.chatMessages[index] : { role: "assistant", content: root.chatPartial || "…" }
                         width: chatView.width; radius: 8
-                        color: m.role === "user" ? root.cRaised : m.role === "error" ? "#3a1f22" : root.cSurface
+                        color: m.role === "user" ? root.cRaised : m.role === "error" ? Theme.colors.getColor(root.cBad, 0.15) : root.cSurface
                         height: body.implicitHeight + meta.implicitHeight + 24
                         Text { id: meta; x: 12; y: 8; color: root.cTert; font.pixelSize: 11
                                text: m.role === "user" ? "You" : m.role === "error" ? "Error" : ("AI" + (m.model ? "  ·  " + m.model : "") + (m.privacy ? "  ·  " + (root.tierNames[m.privacy] || m.privacy) : "")) }
@@ -339,13 +341,10 @@ Item {
                     Layout.fillWidth: true
                     ScrollView {
                         Layout.fillWidth: true; Layout.preferredHeight: Math.min(Math.max(chatInput.implicitHeight, 46), 180)
-                        TextArea {
+                        LogosTextArea {
                             id: chatInput; objectName: "chatInput"
-                            wrapMode: TextArea.Wrap; font.pixelSize: 14
-                            color: root.cText; placeholderTextColor: root.cTert; selectionColor: "#3d4f80"; selectedTextColor: "#ffffff"
-                            leftPadding: 12; rightPadding: 12; topPadding: 12; bottomPadding: 12
+                            wrapMode: TextArea.Wrap
                             placeholderText: "Ask anything  (Enter sends, Shift+Enter for a new line)"
-                            background: Rectangle { radius: 8; color: "#12151b"; border.color: chatInput.activeFocus ? root.cAccent : root.cBorder }
                             // Enter sends; Shift+Enter (and IME composition) inserts a new line as usual
                             Keys.onPressed: function (e) {
                                 if ((e.key === Qt.Key_Return || e.key === Qt.Key_Enter) && !(e.modifiers & Qt.ShiftModifier) && chatInput.preeditText === "") {
@@ -380,6 +379,7 @@ Item {
                                     Text { text: modelData.name; color: root.cText; font.pixelSize: 15; font.bold: true }
                                     Rectangle { radius: 4; color: "transparent"; border.color: root.tierColor(modelData.privacy); implicitWidth: tl.implicitWidth + 10; implicitHeight: tl.implicitHeight + 4
                                                 Text { id: tl; anchors.centerIn: parent; text: modelData.privacyNote ? "Varies by model" : (root.tierNames[modelData.privacy] || modelData.privacy); color: root.tierColor(modelData.privacy); font.pixelSize: 11 } }
+                                    ExperimentalBadge { visible: !!(root.presetById(modelData.preset) || {}).experimental }
                                     Item { Layout.fillWidth: true }
                                     Btn { text: "Test"; onClicked: root.call("testConnector", [modelData.id], function () { root.toast("Testing " + modelData.name + "…") }) }
                                     Btn { text: "Edit"; onClicked: { root.editId = modelData.id; root.editPreset = root.presetById(modelData.preset) } }
@@ -399,12 +399,13 @@ Item {
                         Repeater {
                             model: root.presetList
                             delegate: Rectangle {
-                                Layout.fillWidth: true; Layout.preferredHeight: 92; radius: 8; color: root.cSurface; border.color: root.cBorder
+                                Layout.fillWidth: true; Layout.preferredHeight: 104; radius: 8; color: root.cSurface; border.color: root.cBorder
                                 ColumnLayout {
                                     x: 10; y: 8; width: parent.width - 20; spacing: 2
                                     Text { text: modelData.name; color: root.cText; font.bold: true; elide: Text.ElideRight; Layout.fillWidth: true }
                                     Text { text: modelData.privacyNote || root.tierNames[modelData.privacy] || modelData.privacy; color: root.tierColor(modelData.privacy); font.pixelSize: 11; elide: Text.ElideRight; Layout.fillWidth: true }
-                                    Text { text: modelData.blurb; color: root.cSec; font.pixelSize: 11; wrapMode: Text.Wrap; maximumLineCount: 2; elide: Text.ElideRight; Layout.fillWidth: true }
+                                    ExperimentalBadge { visible: !!modelData.experimental }
+                                    Text { text: modelData.blurb; color: root.cSec; font.pixelSize: 11; wrapMode: Text.Wrap; maximumLineCount: modelData.experimental ? 1 : 2; elide: Text.ElideRight; Layout.fillWidth: true }
                                 }
                                 MouseArea { anchors.fill: parent; cursorShape: Qt.PointingHandCursor; onClicked: { root.editId = ""; root.editPreset = modelData } }
                             }
@@ -425,6 +426,11 @@ Item {
                         Text { text: edCol.p.name || ""; color: root.cText; font.pixelSize: 18; font.bold: true }
                     }
                     Text { Layout.fillWidth: true; wrapMode: Text.Wrap; color: root.cSec; text: edCol.p.blurb || "" }
+                    LogosNotice {
+                        visible: !!edCol.p.experimental; Layout.fillWidth: true; severity: LogosNotice.Warning
+                        title: "Experimental: report issues!"
+                        message: "This connector follows the provider's documentation but hasn't been tried with a real key yet. If something doesn't work, please open an issue: " + root.issuesUrl
+                    }
                     Text { color: root.tierColor(edCol.p.privacy); text: "Privacy: " + (edCol.p.privacyNote || ((root.tierNames[edCol.p.privacy] || "") + " — " + (root.tierHelp[edCol.p.privacy] || ""))); wrapMode: Text.Wrap; Layout.fillWidth: true }
                     Text { visible: (edCol.p.steps || []).length > 0; text: "How to set it up"; color: root.cText; font.bold: true; Layout.topMargin: 6 }
                     Repeater { model: edCol.p.steps || []
@@ -531,9 +537,9 @@ Item {
                     Text { text: "Local OpenAI endpoint"; color: root.cText; font.bold: true; Layout.topMargin: 14 }
                     Text { Layout.fillWidth: true; wrapMode: Text.Wrap; color: root.cSec; font.pixelSize: 12
                            text: "Lets tools outside Basecamp (editors, agents, scripts) use these models as an OpenAI endpoint on this computer only (127.0.0.1), with the token below." }
-                    Check {
+                    LogosSwitch {
                         text: "Enabled"; checked: !!root.serverObj.enabled
-                        onToggled: function (on) { root.call("setSettings", [JSON.stringify({ server: { enabled: on } })], function () { root.refresh() }) }
+                        onToggled: root.call("setSettings", [JSON.stringify({ server: { enabled: checked } })], function () { root.refresh() })
                     }
                     Text { visible: !!root.serverObj.enabled; color: root.serverObj.running ? root.cGood : root.cBad; textFormat: Text.PlainText
                            text: root.serverObj.running ? ("Base URL " + root.serverObj.url) : ("Not running: " + (root.serverObj.error || "starting…")) }
@@ -592,37 +598,21 @@ Item {
     }
 
 
-    // ── controls: dark, readable, ours (the default Qt style is light and ignores the palette) ──
-    // Inline components can't see this file's ids, so the palette is repeated here.
-    component Btn: Rectangle {
-        id: b
-        property string text: ""
+    // ── controls: thin wrappers over the design system's (Logos.Controls) ──
+    component Btn: LogosButton {
         property bool primary: false
-        property bool danger: false
-        signal clicked()
-        implicitWidth: bl.implicitWidth + 24; implicitHeight: 32; radius: 6
-        opacity: enabled ? 1 : 0.45
-        color: primary ? (ma.containsMouse ? "#93adff" : "#7c9cff") : (ma.containsMouse ? "#2a2f3a" : "#1f232c")
-        border.color: primary ? "transparent" : (danger ? "#e66a6a" : "#2b303b")
-        Text { id: bl; anchors.centerIn: parent; text: b.text; font.pixelSize: 13; font.bold: b.primary
-               color: b.primary ? "#0f1115" : (b.danger ? "#e66a6a" : "#e6e8ee") }
-        MouseArea { id: ma; anchors.fill: parent; hoverEnabled: true; cursorShape: Qt.PointingHandCursor; onClicked: if (b.enabled) b.clicked() }
+        property bool danger: false        // kept for call sites; the design system has no danger variant
+        variant: primary ? LogosButton.Variant.Primary : LogosButton.Variant.Secondary
+        compact: true
     }
-    component Field: TextField {
-        color: "#e6e8ee"; placeholderTextColor: "#6d7486"; selectionColor: "#3d4f80"; selectedTextColor: "#ffffff"
-        font.pixelSize: 13; leftPadding: 10; rightPadding: 10; topPadding: 7; bottomPadding: 7
-        background: Rectangle { radius: 6; color: "#12151b"; border.color: parent.activeFocus ? "#7c9cff" : "#2b303b" }
+    component Field: LogosTextField {
+        function selectAll() { textInput.selectAll() }
+        function copy() { textInput.copy() }
     }
-    component Check: Row {
-        id: ck
-        property bool checked: false
-        property string text: ""
-        signal toggled(bool checked)
-        spacing: 8
-        Rectangle { width: 36; height: 20; radius: 10; color: ck.checked ? "#7c9cff" : "#2b303b"; anchors.verticalCenter: parent.verticalCenter
-            Rectangle { width: 16; height: 16; radius: 8; y: 2; x: ck.checked ? 18 : 2; color: "#e6e8ee"; Behavior on x { NumberAnimation { duration: 120 } } } }
-        Text { text: ck.text; color: "#e6e8ee"; font.pixelSize: 13; anchors.verticalCenter: parent.verticalCenter }
-        TapHandler { onTapped: ck.toggled(!ck.checked) }
+    // the design system's badge, for connectors built from docs but not yet tried with a real key
+    component ExperimentalBadge: LogosBadge {
+        text: "Experimental: report issues!"
+        color: Theme.palette.warning
     }
     // one chip per privacy tier; `value` is the chosen tier id
     component TierChips: Flow {
@@ -635,8 +625,8 @@ Item {
             delegate: Rectangle {
                 property bool on: tc.value === modelData[0]
                 width: ct.implicitWidth + 22; height: 28; radius: 14
-                color: on ? "#25304d" : "#1f232c"; border.color: on ? "#7c9cff" : "#2b303b"
-                Text { id: ct; anchors.centerIn: parent; text: modelData[1]; font.pixelSize: 12; color: parent.on ? "#e6e8ee" : "#a3a9b8" }
+                color: on ? Theme.palette.surfaceRaised : Theme.palette.backgroundSecondary; border.color: on ? Theme.palette.primary : Theme.palette.border
+                Text { id: ct; anchors.centerIn: parent; text: modelData[1]; font.pixelSize: 12; color: parent.on ? Theme.palette.text : Theme.palette.textSecondary }
                 MouseArea { anchors.fill: parent; cursorShape: Qt.PointingHandCursor; onClicked: tc.chosen(modelData[0]) }
             }
         }
@@ -652,7 +642,7 @@ Item {
         signal picked(string id)
         signal pinToggled(string id)
         function tierName(t) { return ({ "standard": "Standard", "no-retention": "No retention", "tee": "TEE", "tee-e2ee": "TEE + E2EE", "local": "On this device" })[t] || t || "" }
-        function tierColor(t) { return t === "local" ? "#4fc28a" : (t === "tee" || t === "tee-e2ee") ? "#7c9cff" : t === "no-retention" ? "#e6b450" : "#6d7486" }
+        function tierColor(t) { return t === "local" ? Theme.palette.success : (t === "tee" || t === "tee-e2ee") ? Theme.palette.info : t === "no-retention" ? Theme.palette.warning : Theme.palette.textTertiary }
         function find(id) { for (var i = 0; i < models.length; i++) if (models[i].id === id) return models[i]; return null }
         function rows(q) {
             q = (q || "").toLowerCase().trim()
@@ -666,64 +656,63 @@ Item {
             return out
         }
         property var cur: find(current)
-        function openList() { search.text = ""; list.currentIndex = -1; pop.open(); search.forceActiveFocus() }
+        function openList() { search.text = ""; list.currentIndex = -1; pop.open(); search.textInput.forceActiveFocus() }
         implicitWidth: 420; implicitHeight: 34; radius: 6
-        color: pma.containsMouse ? "#22262f" : "#12151b"; border.color: pop.visible ? "#7c9cff" : "#2b303b"
+        color: pma.containsMouse ? Theme.palette.surface : Theme.palette.backgroundInset; border.color: pop.visible ? Theme.palette.primary : Theme.palette.border
         opacity: enabled ? 1 : 0.5
         Row {
             anchors.verticalCenter: parent.verticalCenter; x: 10; spacing: 8; width: parent.width - 40; clip: true
             Rectangle { visible: !!mp.cur; anchors.verticalCenter: parent.verticalCenter; width: 8; height: 8; radius: 4; color: mp.tierColor(mp.cur ? mp.cur.privacy : "") }
-            Text { anchors.verticalCenter: parent.verticalCenter; color: mp.cur || mp.noneLabel ? "#e6e8ee" : "#6d7486"; font.pixelSize: 13; elide: Text.ElideRight; width: parent.width - 16
+            Text { anchors.verticalCenter: parent.verticalCenter; color: mp.cur || mp.noneLabel ? Theme.palette.text : Theme.palette.textTertiary; font.pixelSize: 13; elide: Text.ElideRight; width: parent.width - 16
                    text: mp.cur ? mp.cur.name + "   " + mp.cur.connectorName + " · " + mp.tierName(mp.cur.privacy) : (mp.noneLabel || (mp.models.length ? "Choose a model" : "No models")) }
         }
-        Text { anchors.right: parent.right; anchors.rightMargin: 10; anchors.verticalCenter: parent.verticalCenter; text: "▾"; color: "#a3a9b8" }
+        Text { anchors.right: parent.right; anchors.rightMargin: 10; anchors.verticalCenter: parent.verticalCenter; text: "▾"; color: Theme.palette.textSecondary }
         MouseArea { id: pma; anchors.fill: parent; hoverEnabled: true; cursorShape: Qt.PointingHandCursor
                     onClicked: if (mp.enabled) mp.openList() }
         Popup {
             id: pop
             y: mp.height + 4; width: Math.max(mp.width, 480); height: 420; padding: 8
-            background: Rectangle { color: "#171a21"; radius: 8; border.color: "#2b303b" }
+            background: Rectangle { color: Theme.palette.backgroundSecondary; radius: 8; border.color: Theme.palette.border }
             property var shown: mp.rows(search.text)
             function firstModel(from, dir) { for (var i = from; i >= 0 && i < shown.length; i += dir) if (!shown[i].header) return i; return list.currentIndex }
             function choose(r) { if (!r || r.header) return; pop.close(); mp.picked(r.none ? "" : r.id) }
             ColumnLayout {
                 anchors.fill: parent; spacing: 6
-                Field {
+                LogosSearchBar {
                     id: search; objectName: "pickerSearch"; Layout.fillWidth: true; placeholderText: "Search models, providers, privacy…"
                     Keys.onDownPressed: list.currentIndex = pop.firstModel(list.currentIndex + 1, 1)
                     Keys.onUpPressed: list.currentIndex = pop.firstModel(list.currentIndex - 1, -1)
-                    Keys.onReturnPressed: pop.choose(pop.shown[list.currentIndex >= 0 ? list.currentIndex : pop.firstModel(0, 1)])
-                    Keys.onEnterPressed: pop.choose(pop.shown[list.currentIndex >= 0 ? list.currentIndex : pop.firstModel(0, 1)])
                     Keys.onEscapePressed: pop.close()
+                    onSubmitted: pop.choose(pop.shown[list.currentIndex >= 0 ? list.currentIndex : pop.firstModel(0, 1)])
                 }
-                Text { visible: pop.shown.length === 0; text: "No model matches."; color: "#6d7486"; font.pixelSize: 12; Layout.leftMargin: 4 }
+                Text { visible: pop.shown.length === 0; text: "No model matches."; color: Theme.palette.textTertiary; font.pixelSize: 12; Layout.leftMargin: 4 }
                 ListView {
                     id: list; Layout.fillWidth: true; Layout.fillHeight: true; clip: true; model: pop.shown
                     ScrollBar.vertical: ScrollBar {}
                     delegate: Item {
                         property var r: modelData
                         width: list.width; height: r.header ? 26 : 38
-                        Text { visible: !!r.header; text: r.header || ""; color: "#6d7486"; font.pixelSize: 11; font.bold: true; x: 8; anchors.bottom: parent.bottom; anchors.bottomMargin: 4 }
+                        Text { visible: !!r.header; text: r.header || ""; color: Theme.palette.textTertiary; font.pixelSize: 11; font.bold: true; x: 8; anchors.bottom: parent.bottom; anchors.bottomMargin: 4 }
                         Rectangle {
                             visible: !r.header; anchors.fill: parent; radius: 6
-                            color: index === list.currentIndex || rma.containsMouse ? "#25304d" : ((r.none ? "" === mp.current : r.id === mp.current) ? "#1f232c" : "transparent")
+                            color: index === list.currentIndex || rma.containsMouse ? Theme.palette.surfaceRaised : ((r.none ? "" === mp.current : r.id === mp.current) ? Theme.palette.backgroundSecondary : "transparent")
                             MouseArea { id: rma; anchors.fill: parent; hoverEnabled: true; cursorShape: Qt.PointingHandCursor; onClicked: pop.choose(r) }
                             Rectangle { visible: !r.none; x: 10; anchors.verticalCenter: parent.verticalCenter; width: 8; height: 8; radius: 4; color: mp.tierColor(r.privacy) }
                             Column {
                                 x: 26; anchors.verticalCenter: parent.verticalCenter; width: parent.width - 26 - 40
-                                Text { text: r.none ? mp.noneLabel : (r.name || ""); color: "#e6e8ee"; font.pixelSize: 13; elide: Text.ElideRight; width: parent.width }
-                                Text { visible: !r.none; text: (r.connectorName || "") + " · " + mp.tierName(r.privacy) + (r.name !== r.id ? " · " + r.id : ""); color: "#6d7486"; font.pixelSize: 11; elide: Text.ElideRight; width: parent.width }
+                                Text { text: r.none ? mp.noneLabel : (r.name || ""); color: Theme.palette.text; font.pixelSize: 13; elide: Text.ElideRight; width: parent.width }
+                                Text { visible: !r.none; text: (r.connectorName || "") + " · " + mp.tierName(r.privacy) + (r.name !== r.id ? " · " + r.id : ""); color: Theme.palette.textTertiary; font.pixelSize: 11; elide: Text.ElideRight; width: parent.width }
                             }
                             Text {
                                 visible: !r.none; anchors.right: parent.right; anchors.rightMargin: 12; anchors.verticalCenter: parent.verticalCenter
                                 property bool on: mp.pinned.indexOf(r.id) >= 0
-                                text: on ? "★" : "☆"; font.pixelSize: 17; color: on ? "#e6b450" : (sma.containsMouse ? "#e6e8ee" : "#6d7486")
+                                text: on ? "★" : "☆"; font.pixelSize: 17; color: on ? Theme.palette.warning : (sma.containsMouse ? Theme.palette.text : Theme.palette.textTertiary)
                                 MouseArea { id: sma; anchors.fill: parent; anchors.margins: -8; hoverEnabled: true; cursorShape: Qt.PointingHandCursor; onClicked: mp.pinToggled(r.id) }
                             }
                         }
                     }
                 }
-                Text { text: "★ pins a model to the top of every list.  ↑↓ Enter to pick."; color: "#6d7486"; font.pixelSize: 11; Layout.leftMargin: 4 }
+                Text { text: "★ pins a model to the top of every list.  ↑↓ Enter to pick."; color: Theme.palette.textTertiary; font.pixelSize: 11; Layout.leftMargin: 4 }
             }
         }
     }
