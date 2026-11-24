@@ -145,6 +145,11 @@ int main(int argc, char** argv) {
         json rl = J(core.saveConnector(R"({"preset":"custom","name":"far box","baseUrl":"http://203.0.113.9/v1","privacy":"local"})"));
         std::string farTier; for (auto& cc : J(core.connectors())) if (cc.value("id", "") == rl.value("id", "")) farTier = cc.value("privacy", "");
         CHECK(farTier == "standard", "AIGW-6: a remote custom connector can't be labelled local (" + farTier + ")");
+        // a local runtime preset pointed at another machine: its card isn't "on this device" either
+        json om = J(core.saveConnector(R"({"preset":"ollama","baseUrl":"http://ai.box.example/v1"})"));
+        json omc; for (auto& cc : J(core.connectors())) if (cc.value("id", "") == om.value("id", "")) omc = cc;
+        CHECK(omc.value("privacy", "") == "standard" && omc.value("remote", false) && omc.value("name", "") == "Ollama (ai.box.example)", "a local preset on another host is labelled standard + by its host: " + omc.value("name", std::string()));
+        core.removeConnector(om.value("id", ""));
         core.removeConnector(rl.value("id", ""));
         // AIGW-8: on a NEAR-shaped connector only listed open models keep the TEE tier
         json nr = J(core.saveConnector(R"({"preset":"nearai","baseUrl":"http://127.0.0.1:18765/v1","apiKey":"sekret"})"));

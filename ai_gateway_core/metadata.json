@@ -1,7 +1,7 @@
 {
  "name": "ai_gateway_core",
  "display_name": "AI Gateway (core)",
- "version": "0.1.6",
+ "version": "0.1.7",
  "type": "core",
  "interface": "universal",
  "category": "productivity",

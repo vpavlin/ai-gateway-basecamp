@@ -33,7 +33,7 @@
 using json = nlohmann::json;
 
 namespace {
-const char* kVersion = "0.1.6";
+const char* kVersion = "0.1.7";
 
 long long nowMs() {
     return std::chrono::duration_cast<std::chrono::milliseconds>(std::chrono::system_clock::now().time_since_epoch()).count();
@@ -302,6 +302,15 @@ std::string AiGatewayCoreImpl::connectors() {
         const json p = presetFor(jstr(c, "preset"));
         // the connector's usual tier (its models may differ: Venice per model, NEAR's proxied models)
         o["privacy"] = jstr(c, "preset") == "custom" ? jstr(c, "privacy", "standard") : jstr(p, "privacy", "standard");
+        // "on this device" only for this computer: a local runtime on another host is labelled by its host
+        o["remote"] = !isLoopbackUrl(jstr(c, "baseUrl"));
+        if (o["remote"].get<bool>() && o["privacy"] == "local") {
+            o["privacy"] = "standard";
+            std::string nm = jstr(c, "name");
+            const std::string tag = " (this computer)";
+            if (nm.size() > tag.size() && nm.compare(nm.size() - tag.size(), tag.size(), tag) == 0)
+                o["name"] = nm.substr(0, nm.size() - tag.size()) + " (" + QUrl(QString::fromStdString(jstr(c, "baseUrl"))).host().toStdString() + ")";
+        }
         if (!jstr(p, "privacyNote").empty()) o["privacyNote"] = p["privacyNote"];
         if (jstr(c, "balance") != "") o["balance"] = c["balance"];
         out.push_back(o);
