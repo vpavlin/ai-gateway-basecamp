@@ -2,7 +2,8 @@
 
 Work continues on sensible defaults; each question says which default is in use. Answer any time.
 
-1. **Name.** The working names are `ai_gateway_core` / `ai_gateway` ("AI Gateway") with intents
+1. **Name.** ANSWERED 2026-11-24: keep "AI Gateway" / `ai_gateway_core` / `ai_gateway`; the repo is vpavlin/ai-gateway-basecamp.
+   Original question: The working names are `ai_gateway_core` / `ai_gateway` ("AI Gateway") with intents
    `ai.chat` / `ai.ask`. Do you want a product name, like WhisperBox or Zine Press? Renaming before
    the first public release is cheap; afterwards it breaks `uses`.
 2. **Intent names.** `ai.chat` (OpenAI messages) and `ai.ask` (prompt + content) are in. Do you also
@@ -30,7 +31,8 @@ Work continues on sensible defaults; each question says which default is in use.
    default, or reachable from the LAN (for a home inference box)?
 9. **Platforms.** The usual three (amd64, arm64, darwin-arm64), plus an Android app later? Default:
    Basecamp only for 0.1.
-10. **Repository and publishing.** The code is local in `~/ai-gateway` on atlas (2 commits). atlas can
+10. **Repository and publishing.** ANSWERED 2026-11-24: https://github.com/vpavlin/ai-gateway-basecamp (atlas pushes with a deploy key; CI builds arm64 and darwin).
+    Original question: The code is local in `~/ai-gateway` on atlas (2 commits). atlas can
     only push with a per-repo deploy key and can't create repos. Could you (or jimmy-crib/vpavlin)
     create the GitHub repo and add the atlas deploy key? It's needed for:
     - the arm64 and darwin CI builds (the always-three-platforms rule);
