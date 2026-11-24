@@ -33,7 +33,7 @@
 using json = nlohmann::json;
 
 namespace {
-const char* kVersion = "0.1.4";
+const char* kVersion = "0.1.5";
 
 long long nowMs() {
     return std::chrono::duration_cast<std::chrono::milliseconds>(std::chrono::system_clock::now().time_since_epoch()).count();
@@ -211,6 +211,7 @@ void AiGatewayCoreImpl::load() {
     if (tierRank(jstr(m_settings, "minPrivacy")) < 0) m_settings["minPrivacy"] = "standard";
     if (!m_settings.contains("defaultModel") || !m_settings["defaultModel"].is_string()) m_settings["defaultModel"] = "";
     if (!m_settings.contains("pinnedModels") || !m_settings["pinnedModels"].is_array()) m_settings["pinnedModels"] = json::array();
+    if (!m_settings.contains("remoteAcknowledged") || !m_settings["remoteAcknowledged"].is_boolean()) m_settings["remoteAcknowledged"] = false;
     if (!m_settings.contains("server") || !m_settings["server"].is_object()) m_settings["server"] = json::object();
     json& sv = m_settings["server"];
     if (!sv.contains("enabled") || !sv["enabled"].is_boolean()) sv["enabled"] = false;
@@ -861,6 +862,11 @@ std::string AiGatewayCoreImpl::setSettings(std::string settingsJson) {
         json pins = json::array();
         for (const auto& v : in["pinnedModels"]) if (v.is_string() && !v.get<std::string>().empty() && v.get<std::string>().size() <= 256) pins.push_back(v);
         m_settings["pinnedModels"] = pins;
+    }
+    // the user read the warning about remote (non-local) providers; the view shows them only after that
+    if (in.contains("remoteAcknowledged")) {
+        if (!in["remoteAcknowledged"].is_boolean()) return json({{"ok", false}, {"error", "remoteAcknowledged must be true or false"}}).dump();
+        m_settings["remoteAcknowledged"] = in["remoteAcknowledged"];
     }
     if (in.contains("server") && in["server"].is_object()) {
         const json& s = in["server"];

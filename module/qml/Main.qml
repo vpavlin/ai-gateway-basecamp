@@ -36,6 +36,11 @@ Item {
     property var serverObj: ({})
     property var usageObj: ({})
     property var sessionList: []
+    // remote (non-local) providers: hidden until the user has read the warning once (settings.remoteAcknowledged)
+    property bool showRemote: false
+    property bool remoteWarningOpen: false
+    readonly property bool remoteOk: settingsObj.remoteAcknowledged === true
+    readonly property string remoteWarning: "These run the model on someone else's computer. Each provider makes privacy promises: some don't keep your prompts, some run in confidential hardware. None can guarantee full privacy. Your prompts leave this computer, and your IP address, timing, account and payment can identify you. Use them at your own risk."
     property string toastMsg: ""
     // chat
     property var chatMessages: []          // [{role, content, model?, privacy?}]
@@ -115,6 +120,21 @@ Item {
         if (i >= 0) p.splice(i, 1); else p.push(id)
         var so = Object.assign({}, settingsObj); so.pinnedModels = p; settingsObj = so   // show it at once
         call("setSettings", [JSON.stringify({ pinnedModels: p })], function (r) { var v = parse(r); if (!v || !v.ok) { toast(v && v.error ? v.error : "couldn't save the pin"); refresh() } })
+    }
+    // is a URL's host this computer? (the core uses the same rule for the "On this device" tier)
+    function isLoopback(url) {
+        var m = /^https?:\/\/(\[[^\]]*\]|[^\/:]+)/i.exec(String(url || "")); if (!m) return false
+        var h = m[1].toLowerCase()
+        return h === "localhost" || h === "[::1]" || h.indexOf("127.") === 0
+    }
+    function isLocalPreset(p) { return !!p && (p.kind === "local" || p.id === "custom") }
+    function localPresets() { return presetList.filter(function (p) { return isLocalPreset(p) }) }
+    function remotePresets() { return presetList.filter(function (p) { return !isLocalPreset(p) }) }
+    function revealRemote() { if (remoteOk) showRemote = true; else remoteWarningOpen = true }
+    function acknowledgeRemote() {
+        var so = Object.assign({}, settingsObj); so.remoteAcknowledged = true; settingsObj = so
+        remoteWarningOpen = false; showRemote = true
+        call("setSettings", [JSON.stringify({ remoteAcknowledged: true })], function () { refresh() })
     }
     function presetById(id) { for (var i = 0; i < presetList.length; i++) if (presetList[i].id === id) return presetList[i]; return null }
 
@@ -369,7 +389,7 @@ Item {
                     id: connCol; width: parent.width; spacing: 10
                     Text { textFormat: Text.PlainText; text: "Connectors"; color: root.cText; font.pixelSize: 18; font.bold: true }
                     Text { textFormat: Text.PlainText; Layout.fillWidth: true; wrapMode: Text.Wrap; color: root.cSec
-                           text: "Where your AI runs. Local runtimes keep everything on this computer; private providers promise more than usual, and the tier shows how much. Keys stay on this computer and only ever go to their own provider." }
+                           text: "Where your AI runs. Local runtimes keep everything on this computer. Remote providers run the model elsewhere: they are hidden until you choose to see them, and the tier shows what each one promises. Keys stay on this computer and only ever go to their own provider." }
                     Repeater {
                         model: root.connectorList
                         delegate: Rectangle {
@@ -381,6 +401,7 @@ Item {
                                     Text { textFormat: Text.PlainText; text: modelData.name; color: root.cText; font.pixelSize: 15; font.bold: true }
                                     Rectangle { radius: 4; color: "transparent"; border.color: root.tierColor(modelData.privacy); implicitWidth: tl.implicitWidth + 10; implicitHeight: tl.implicitHeight + 4
                                                 Text { textFormat: Text.PlainText; id: tl; anchors.centerIn: parent; text: modelData.privacyNote ? "Varies by model" : (root.tierNames[modelData.privacy] || modelData.privacy); color: root.tierColor(modelData.privacy); font.pixelSize: 11 } }
+                                    LogosBadge { visible: !root.isLoopback(modelData.baseUrl); text: "Remote"; color: Theme.palette.textSecondary }
                                     ExperimentalBadge { visible: !!(root.presetById(modelData.preset) || {}).experimental }
                                     Item { Layout.fillWidth: true }
                                     Btn { text: "Test"; onClicked: root.call("testConnector", [modelData.id], function () { root.toast("Testing " + modelData.name + "…") }) }
@@ -395,11 +416,11 @@ Item {
                             }
                         }
                     }
-                    Text { textFormat: Text.PlainText; text: "Add a connector"; color: root.cText; font.pixelSize: 16; font.bold: true; Layout.topMargin: 10 }
+                    Text { textFormat: Text.PlainText; text: "Add a connector on this computer"; color: root.cText; font.pixelSize: 16; font.bold: true; Layout.topMargin: 10 }
                     GridLayout {
                         Layout.fillWidth: true; columns: 3; columnSpacing: 10; rowSpacing: 10
                         Repeater {
-                            model: root.presetList
+                            model: root.localPresets()
                             delegate: Rectangle {
                                 Layout.fillWidth: true; Layout.preferredHeight: 104; radius: 8; color: root.cSurface; border.color: root.cBorder
                                 ColumnLayout {
@@ -413,6 +434,41 @@ Item {
                             }
                         }
                     }
+                    // remote providers: behind a warning the user acknowledges once
+                    Btn {
+                        visible: !root.showRemote && !root.remoteWarningOpen; Layout.topMargin: 6
+                        text: "Show remote providers (Venice, NEAR AI, Nillion, Morpheus, AkashML)…"
+                        onClicked: root.revealRemote()
+                    }
+                    LogosNotice {
+                        visible: root.remoteWarningOpen || root.showRemote; Layout.fillWidth: true; Layout.topMargin: 6; severity: LogosNotice.Warning
+                        title: "Remote providers: not on this computer"
+                        message: root.remoteWarning
+                    }
+                    RowLayout {
+                        visible: root.remoteWarningOpen
+                        Btn { primary: true; text: "I understand, show them"; onClicked: root.acknowledgeRemote() }
+                        Btn { text: "Keep them hidden"; onClicked: root.remoteWarningOpen = false }
+                    }
+                    GridLayout {
+                        visible: root.showRemote
+                        Layout.fillWidth: true; columns: 3; columnSpacing: 10; rowSpacing: 10
+                        Repeater {
+                            model: root.remotePresets()
+                            delegate: Rectangle {
+                                Layout.fillWidth: true; Layout.preferredHeight: 104; radius: 8; color: root.cSurface; border.color: root.cBorder
+                                ColumnLayout {
+                                    x: 10; y: 8; width: parent.width - 20; spacing: 2
+                                    Text { textFormat: Text.PlainText; text: modelData.name; color: root.cText; font.bold: true; elide: Text.ElideRight; Layout.fillWidth: true }
+                                    Text { textFormat: Text.PlainText; text: modelData.privacyNote || root.tierNames[modelData.privacy] || modelData.privacy; color: root.tierColor(modelData.privacy); font.pixelSize: 11; elide: Text.ElideRight; Layout.fillWidth: true }
+                                    ExperimentalBadge { visible: !!modelData.experimental }
+                                    Text { textFormat: Text.PlainText; text: modelData.blurb; color: root.cSec; font.pixelSize: 11; wrapMode: Text.Wrap; maximumLineCount: modelData.experimental ? 1 : 2; elide: Text.ElideRight; Layout.fillWidth: true }
+                                }
+                                MouseArea { anchors.fill: parent; cursorShape: Qt.PointingHandCursor; onClicked: { root.editId = ""; root.editPreset = modelData } }
+                            }
+                        }
+                    }
+                    Btn { visible: root.showRemote; text: "Hide remote providers"; onClicked: root.showRemote = false }
                 }
             }
 
@@ -428,6 +484,12 @@ Item {
                         Text { textFormat: Text.PlainText; text: edCol.p.name || ""; color: root.cText; font.pixelSize: 18; font.bold: true }
                     }
                     Text { textFormat: Text.PlainText; Layout.fillWidth: true; wrapMode: Text.Wrap; color: root.cSec; text: edCol.p.blurb || "" }
+                    LogosNotice {
+                        visible: !root.isLocalPreset(edCol.p) || (edCol.p.id === "custom" && edUrl.text.trim() !== "" && !root.isLoopback(edUrl.text.trim()))
+                        Layout.fillWidth: true; severity: LogosNotice.Warning
+                        title: "A remote provider: not on this computer"
+                        message: root.remoteWarning
+                    }
                     LogosNotice {
                         visible: !!edCol.p.experimental; Layout.fillWidth: true; severity: LogosNotice.Warning
                         title: "Experimental: report issues!"
@@ -575,6 +637,11 @@ Item {
                                        text: root.intentMessages().map(function (m) { return "[" + m.role + "] " + (typeof m.content === "string" ? m.content : JSON.stringify(m.content)) }).join("\n\n") } }
                     }
                     Text { textFormat: Text.PlainText; color: root.cSec; text: "The app asks for at least: " + (root.tierNames[root.intentFloor()] || root.intentFloor()) }
+                    Text {
+                        textFormat: Text.PlainText; Layout.fillWidth: true; wrapMode: Text.Wrap; color: root.cWarn
+                        visible: !!root.intentModel && ((root.modelById(root.intentModel) || {}).privacy || "") !== "local"
+                        text: "This answer comes from a remote provider: your text leaves this computer."
+                    }
                     RowLayout {
                         Text { textFormat: Text.PlainText; text: "Model"; color: root.cSec }
                         ModelPicker {

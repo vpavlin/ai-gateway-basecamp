@@ -9,7 +9,7 @@ labelled.
 - **`ai_gateway`** (view): chat, connector onboarding, settings, and the **`ai.ask` / `ai.chat`
   intents** other apps call.
 
-Status: **core 0.1.4, view 0.1.6** (after the 2026-11-24 security review, ADR 0003). Source: https://github.com/vpavlin/ai-gateway-basecamp. Issues: https://github.com/vpavlin/ai-gateway-basecamp/issues
+Status: **core 0.1.5, view 0.1.7**. Remote providers are hidden until the user acknowledges a warning (ADR 0003 covers the security review). Source: https://github.com/vpavlin/ai-gateway-basecamp. Issues: https://github.com/vpavlin/ai-gateway-basecamp/issues
 Design: `docs/adr/0001-architecture.md`;
 research: `docs/research-providers.md`, `docs/research-private-relay.md`; open questions:
 `QUESTIONS.md`.
@@ -25,6 +25,13 @@ research: `docs/research-providers.md`, `docs/research-private-relay.md`; open q
 | Morpheus | api.mor.org | Standard |
 | AkashML | api.akashml.com | Standard |
 | Custom | any OpenAI-compatible URL | the user declares it |
+
+**Local first.** "Add a connector" shows the runtimes on this computer. The remote providers (Venice, NEAR
+AI, Nillion, Morpheus, AkashML, or a custom URL elsewhere) appear only after the user reads and accepts this,
+once: *These run the model on someone else's computer. Each provider makes privacy promises, but none can
+guarantee full privacy: your prompts leave this computer, and your IP address, timing, account and payment
+can identify you.* Connectors already added stay visible with a "Remote" badge. An app's request says so
+when the chosen model is remote.
 
 **Tested with real accounts:** Venice and Ollama. The others (llama.cpp, LM Studio, NEAR AI, nilAI,
 Morpheus, AkashML) follow each provider's documentation and are marked **Experimental: report issues!** in

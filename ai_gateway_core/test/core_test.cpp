@@ -188,6 +188,9 @@ int main(int argc, char** argv) {
     }
     CHECK(J(core.setSettings(R"({"pinnedModels":["venice/echo","custom/echo"]})")).value("ok", false) && J(core.settings())["pinnedModels"].size() == 2, "pinned models are kept");
     CHECK(!J(core.setSettings(R"({"pinnedModels":"venice/echo"})")).value("ok", true), "pinnedModels must be a list");
+    CHECK(J(core.settings()).value("remoteAcknowledged", true) == false, "remote providers start unacknowledged");
+    CHECK(J(core.setSettings(R"({"remoteAcknowledged":true})")).value("ok", false) && J(core.settings()).value("remoteAcknowledged", false), "the remote-provider warning can be acknowledged");
+    CHECK(!J(core.setSettings(R"({"remoteAcknowledged":"yes"})")).value("ok", true), "remoteAcknowledged must be a boolean");
     CHECK(!J(core.chat("tester", R"({"model":"venice/echo","minPrivacy":"secret","messages":[{"role":"user","content":"x"}]})")).value("ok", true), "an unknown tier is refused");
     CHECK(!J(core.chat("tester", R"({"messages":[]})")).value("ok", true), "no messages: refused");
     // errors and tools

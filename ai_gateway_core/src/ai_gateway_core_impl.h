@@ -48,7 +48,7 @@ public:
     std::string job(std::string jobId);
     // Stop a running job: {ok}
     std::string cancel(std::string jobId);
-    // {defaultModel, minPrivacy, pinnedModels: [model id], server: {enabled, port}}
+    // {defaultModel, minPrivacy, pinnedModels: [model id], remoteAcknowledged, server: {enabled, port}}
     std::string settings();
     // Change settings (partial JSON); also starts or stops the local endpoint: {ok, settings}
     std::string setSettings(std::string settingsJson);

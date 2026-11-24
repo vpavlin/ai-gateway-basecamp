@@ -81,6 +81,22 @@ int main(int argc, char** argv) {
     root->setProperty("editPreset", pv); settle(250);
     view.grabWindow().save(out + "/onboarding-venice.png");
     root->setProperty("editPreset", QVariant());
+    // remote providers are hidden until the warning is acknowledged
+    {
+        root->setProperty("page", "connectors"); root->setProperty("editPreset", QVariant()); settle(200);
+        QVariant lp, rp; QMetaObject::invokeMethod(root, "localPresets", Q_RETURN_ARG(QVariant, lp)); QMetaObject::invokeMethod(root, "remotePresets", Q_RETURN_ARG(QVariant, rp));
+        const bool hidden = !root->property("showRemote").toBool() && lp.toList().size() == 4 && rp.toList().size() == 5;
+        view.grabWindow().save(out + "/connectors-local.png");
+        QMetaObject::invokeMethod(root, "revealRemote"); settle(150);
+        const bool warned = root->property("remoteWarningOpen").toBool() && !root->property("showRemote").toBool();
+        view.grabWindow().save(out + "/connectors-warning.png");
+        QMetaObject::invokeMethod(root, "acknowledgeRemote"); settle(200);
+        const bool shown = root->property("showRemote").toBool() && logos.lastArgs.value("setSettings").contains("remoteAcknowledged");
+        view.grabWindow().save(out + "/connectors-remote.png");
+        fprintf(stderr, "remote hidden by default: %s, warning first: %s, acknowledged + shown: %s\n", hidden ? "yes" : "NO", warned ? "yes" : "NO", shown ? "yes" : "NO");
+        if (!hidden || !warned || !shown) g_errors++;
+        root->setProperty("showRemote", false);
+    }
     // a chat round trip (the mock's job answers "done")
     root->setProperty("page", "chat");
     QMetaObject::invokeMethod(root, "sendChat", Q_ARG(QVariant, QVariant("Summarize my zine")));
@@ -137,6 +153,9 @@ int main(int argc, char** argv) {
     emit logos.intentRequested("req-1", "ai.ask", params, "wb_feedback_demo");
     settle(300);
     view.grabWindow().save(out + "/intent-ask.png");
+    root->setProperty("intentModel", "venice/venice-uncensored"); settle(150);
+    view.grabWindow().save(out + "/intent-remote.png");
+    root->setProperty("intentModel", "ollama/llama3.2"); settle(50);
     QMetaObject::invokeMethod(root, "runIntent");
     settle(1600);
     view.grabWindow().save(out + "/intent-done.png");
