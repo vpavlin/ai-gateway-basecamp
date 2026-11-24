@@ -437,7 +437,7 @@ Item {
                     // remote providers: behind a warning the user acknowledges once
                     Btn {
                         visible: !root.showRemote && !root.remoteWarningOpen; Layout.topMargin: 6
-                        text: "Show remote providers (Venice, NEAR AI, Nillion, Morpheus, AkashML)…"
+                        text: "Show remote providers…"
                         onClicked: root.revealRemote()
                     }
                     LogosNotice {
