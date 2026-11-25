@@ -284,7 +284,10 @@ Item {
                 if (!v || !v.ok) { intentState = "error"; intentAnswer = v && v.error ? v.error : "AI Gateway core didn't answer"; finishIntent(false, { message: intentAnswer.substring(0, 300) }, "failed"); return }
                 intentState = "done"
                 intentAnswer = intentFrom + " can now chat about \u201c" + sj.title + "\u201d with " + (v.model || "") + ", without asking each time. End it any time under Apps & usage."
-                finishIntent(true, { sessionId: v.sessionId, model: v.model || "", connector: v.connectorName || "", privacy: v.privacy || "" }, "")
+                // provider + api: the provider-neutral contract (docs/ai-session-contract.md): the app calls
+                // these core methods on the module named here, whoever provides ai.session
+                finishIntent(true, { sessionId: v.sessionId, model: v.model || "", connector: v.connectorName || "", privacy: v.privacy || "",
+                                     provider: "ai_gateway_core", api: "ai-session/1" }, "")
                 refresh()
             })
             return
