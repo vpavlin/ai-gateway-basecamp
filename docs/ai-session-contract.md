@@ -31,8 +31,15 @@ follow-up requests bound to an earlier one, so a chat can't send one intent per 
 **How a caller reaches the provider:** the provider's name is known only at run time. Call it through the
 SDK's generic client (the name as a string), not a generated wrapper, so there is no build-time dependency.
 
-**Not verified yet:** that Basecamp 0.3.2 lets a core call a module it didn't declare. The module is loaded,
-because the provider's view brought it up to answer the intent.
+**Verified on Basecamp 0.3.2 (2026-11-25, fileverse_core 0.18.0):** a core can call a module it didn't
+declare: no dependency, no LIDL, just the name from `provider`. Fileverse reached ai_gateway_core this way;
+the turn streamed back and ended in an edit card. The module is loaded, because the provider's view brought it
+up to answer the intent.
+
+**Callers should also handle:**
+- an answer without `provider`/`api` (AI Gateway before view 0.1.13): treat it as `ai_gateway_core` +
+  `ai-session/1`;
+- an unknown `api`: fall back to plain `ai.chat` per message.
 
 **The upstream asks that would make this unnecessary:**
 - follow-up intents bound to an approved request (session-scoped routing, no chooser);
