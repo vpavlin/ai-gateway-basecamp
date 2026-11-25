@@ -103,6 +103,12 @@ int main(int argc, char** argv) {
     json jr = J(core.job(jid));
     CHECK(jr.value("text", "") == "echo: hello world, stream me", "streamed text assembled: " + jr.value("text", std::string()));
     CHECK(jr.contains("usage") && jr["usage"].value("completion_tokens", 0) == 7, "a stream asks for usage (stream_options.include_usage) and gets it");
+    {   // jobDelta: only the new text, and a stitched stream equals the whole answer
+        json d0 = J(core.jobDelta(jid, "0")), d1 = J(core.jobDelta(jid, "6")), dx = J(core.jobDelta(jid, "99999"));
+        CHECK(d0.value("delta", "") == "echo: hello world, stream me" && d1.value("delta", "") == "hello world, stream me" && d1.value("offset", 0) == 6
+              && dx.value("delta", "x") == "" && d0.value("done", false) && d0.value("length", 0) == 28, "jobDelta returns only what is new since a length");
+        CHECK(!J(core.jobDelta("job-nope", "0")).value("ok", true), "jobDelta of an unknown job");
+    }
     CHECK(jr.contains("stats") && jr["stats"].value("ttftMs", -1) >= 0 && jr["stats"].value("totalMs", -1) >= jr["stats"].value("ttftMs", 0) && jr["stats"]["tokensPerSec"].is_number() && jr["stats"].value("completionTokens", 0) == 7,
           "speed: time to first token, total time and tokens/s per answer: " + jr["stats"].dump());
     CHECK(J(core.usage())["models"]["venice/echo"].value("runs", 0) >= 1 && J(core.usage())["models"]["venice/echo"].value("tpsRuns", 0) >= 1, "per-model speed is kept in usage()");

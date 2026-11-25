@@ -46,6 +46,8 @@ public:
     std::string chat(std::string caller, std::string requestJson);
     // A job: {id, state: running|done|error|cancelled, text, message, model, connector, privacy, usage, error, caller, stats?: {ttftMs, totalMs, tokensPerSec, completionTokens, estimated}}
     std::string job(std::string jobId);
+    // Only what is new in a job (for showing an answer as it streams): {ok, state, done, offset, delta, length, error?, model, connector, privacy, usage?, stats?}. Pass back the `length` of the previous answer (UTF-8 bytes; not a JS string length); start with "0"; poll every ~0.2-0.5 s
+    std::string jobDelta(std::string jobId, std::string sinceChars);
     // Stop a running job: {ok}
     std::string cancel(std::string jobId);
     // {defaultModel, minPrivacy, pinnedModels: [model id], remoteAcknowledged, instructions: {global, apps: {app: text}}, server: {enabled, port}}

@@ -9,7 +9,7 @@ labelled.
 - **`ai_gateway`** (view): chat, connector onboarding, settings, and the **`ai.ask` / `ai.chat`
   intents** other apps call.
 
-Status: **core 0.1.9, view 0.1.11**. Remote providers are hidden until the user acknowledges a warning (ADR 0003 covers the security review). Source: https://github.com/vpavlin/ai-gateway-basecamp. Issues: https://github.com/vpavlin/ai-gateway-basecamp/issues
+Status: **core 0.1.10, view 0.1.12**. Remote providers are hidden until the user acknowledges a warning (ADR 0003 covers the security review). Source: https://github.com/vpavlin/ai-gateway-basecamp. Issues: https://github.com/vpavlin/ai-gateway-basecamp/issues
 Design: `docs/adr/0001-architecture.md`;
 research: `docs/research-providers.md`, `docs/research-private-relay.md`; open questions:
 `QUESTIONS.md`.
@@ -98,6 +98,8 @@ Basecamp, so a per-message `ai.chat` means a dialog per message. Instead (ADR 00
    - The gateway keeps the history and the latest document. Send only what is new.
    - Read the answer with `job(jobId)` (poll it; a `jobUpdate` event for your `watchId` means "look now").
    - `code: "no_session"` means ask again; `code: "busy"` means wait for the answer.
+   - **To show the answer as it streams:** poll `jobDelta(jobId, since)` every 0.2-0.5 s. Start with `"0"`, then
+     pass back the `length` it returned (UTF-8 bytes). Append each `delta`, and stop when `done` is true.
 3. `closeSession(sessionId)` when the panel closes. The user can also end it in Apps & usage.
 
 The document can be up to 1 MB through `sessionChat`, but only 64 KB through the intent.

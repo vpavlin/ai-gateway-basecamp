@@ -34,7 +34,7 @@
 using json = nlohmann::json;
 
 namespace {
-const char* kVersion = "0.1.9";
+const char* kVersion = "0.1.10";
 
 long long nowMs() {
     return std::chrono::duration_cast<std::chrono::milliseconds>(std::chrono::system_clock::now().time_since_epoch()).count();
@@ -960,6 +960,24 @@ std::string AiGatewayCoreImpl::job(std::string jobId) {
     if (!j->message.is_null()) o["message"] = j->message;
     if (!j->result.is_null()) o["result"] = j->result;
     if (!j->stats.is_null()) o["stats"] = j->stats;
+    return o.dump();
+}
+std::string AiGatewayCoreImpl::jobDelta(std::string jobId, std::string sinceChars) {
+    std::lock_guard<std::recursive_mutex> lk(m_mtx);
+    auto it = m_jobs.find(jobId);
+    if (it == m_jobs.end()) return json({{"ok", false}, {"error", "no such job"}}).dump();
+    const auto& j = it->second;
+    size_t since = 0;
+    try { const long long v = std::stoll(sinceChars.empty() ? "0" : sinceChars); since = v > 0 ? (size_t)v : 0; } catch (...) { since = 0; }
+    if (since > j->text.size()) since = j->text.size();
+    // never cut a UTF-8 character in half: step back to the start of the character
+    while (since > 0 && since < j->text.size() && (static_cast<unsigned char>(j->text[since]) & 0xC0) == 0x80) since--;
+    json o = {{"ok", true}, {"id", j->id}, {"state", j->state}, {"done", j->state != "running"}, {"offset", since},
+              {"delta", j->text.substr(since)}, {"length", j->text.size()}, {"model", j->model}, {"connector", j->connector}, {"privacy", j->privacy}};
+    if (!j->error.empty()) o["error"] = j->error;
+    if (!j->usage.is_null()) o["usage"] = j->usage;
+    if (!j->stats.is_null()) o["stats"] = j->stats;
+    if (!j->message.is_null()) o["message"] = j->message;
     return o.dump();
 }
 void AiGatewayCoreImpl::cancelJob(const std::string& id) {
