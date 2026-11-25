@@ -19,6 +19,6 @@ if [ -z "${WB_DS:-}" ]; then
     fi
     export WB_DS="$DS/src/qml"
 fi
-AIGW_HARNESS_OUT="$AIGW_TMP/render" "$ROOT/tools/qml-harness/render.sh" | grep -E "QML errors|event delta|pin saved|picked|enter sends|session allowed|remote hidden|instructions in preview|screenshots" || fail=1
+AIGW_HARNESS_OUT="$AIGW_TMP/render" "$ROOT/tools/qml-harness/render.sh" | grep -E "QML errors|event delta|pin saved|picked|enter sends|session allowed|remote hidden|instructions in preview|typed instructions kept|screenshots" || fail=1
 grep -q "QML errors: 0, intent answered: yes" <(AIGW_HARNESS_OUT="$AIGW_TMP/render" "$ROOT/tools/qml-harness/render.sh" 2>&1) || fail=1
 [ $fail = 0 ] && echo "ALL LAYERS GREEN" || { echo "SOMETHING FAILED"; exit 1; }

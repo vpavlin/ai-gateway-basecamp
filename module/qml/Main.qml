@@ -663,24 +663,24 @@ Item {
                     Text { textFormat: Text.PlainText; Layout.fillWidth: true; wrapMode: Text.Wrap; color: root.cSec; font.pixelSize: 12
                            text: "Added to every request after the app's own instructions, marked as yours, so they win where they conflict. Apps can't see or change them; they show in the preview when an app asks." }
                     Text { textFormat: Text.PlainText; text: "For everything"; color: root.cSec; font.pixelSize: 12; Layout.topMargin: 4 }
-                    LogosTextArea {
-                        id: insGlobal; objectName: "insGlobal"; Layout.fillWidth: true; Layout.preferredHeight: 80; wrapMode: TextArea.Wrap
+                    InstructionBox {
+                        id: insGlobal; objectName: "insGlobal"; Layout.fillWidth: true; Layout.preferredHeight: 80
                         placeholderText: "e.g. Answer in Czech. Be brief. Never make up facts."
-                        text: (root.settingsObj.instructions || {}).global || ""
+                        saved: (root.settingsObj.instructions || {}).global || ""
                     }
-                    Btn { text: "Save"; onClicked: root.saveInstructions("", insGlobal.text.trim()) }
+                    Btn { text: insGlobal.dirty ? "Save (not saved yet)" : "Save"; primary: insGlobal.dirty; onClicked: { root.saveInstructions("", insGlobal.text.trim()); insGlobal.dirty = false } }
                     Text { textFormat: Text.PlainText; text: "For one app"; color: root.cSec; font.pixelSize: 12; Layout.topMargin: 8 }
                     Repeater {
                         model: root.instructionApps()
                         delegate: ColumnLayout {
                             Layout.fillWidth: true; spacing: 4
                             Text { textFormat: Text.PlainText; text: modelData === "ai_gateway" ? "Chat here (AI Gateway)" : modelData; color: root.cText; font.pixelSize: 13 }
-                            LogosTextArea {
-                                id: insApp; Layout.fillWidth: true; Layout.preferredHeight: 60; wrapMode: TextArea.Wrap
+                            InstructionBox {
+                                id: insApp; Layout.fillWidth: true; Layout.preferredHeight: 60
                                 placeholderText: modelData === "ai_gateway" ? "e.g. You are my writing assistant." : "e.g. Keep suggestions short; British spelling."
-                                text: ((root.settingsObj.instructions || {}).apps || {})[modelData] || ""
+                                saved: ((root.settingsObj.instructions || {}).apps || {})[modelData] || ""
                             }
-                            Btn { text: "Save"; onClicked: root.saveInstructions(modelData, insApp.text.trim()) }
+                            Btn { text: insApp.dirty ? "Save (not saved yet)" : "Save"; primary: insApp.dirty; onClicked: { root.saveInstructions(modelData, insApp.text.trim()); insApp.dirty = false } }
                         }
                     }
                     Text { textFormat: Text.PlainText; text: "Local OpenAI endpoint"; color: root.cText; font.bold: true; Layout.topMargin: 14 }
@@ -762,6 +762,16 @@ Item {
     component Field: LogosTextField {
         function selectAll() { textInput.selectAll() }
         function copy() { textInput.copy() }
+    }
+    // A text box for the user's instructions. It shows the saved text, but never overwrites what the user is
+    // typing: the view refreshes settings every few seconds, and a plain binding would reset the box.
+    component InstructionBox: LogosTextArea {
+        property string saved: ""
+        property bool dirty: false
+        wrapMode: TextArea.Wrap
+        Component.onCompleted: text = saved
+        onSavedChanged: if (!dirty) text = saved
+        onTextChanged: if (text !== saved) dirty = true; else dirty = false
     }
     // the design system's badge, for connectors built from docs but not yet tried with a real key
     component ExperimentalBadge: LogosBadge {

@@ -97,6 +97,19 @@ int main(int argc, char** argv) {
         if (!hidden || !warned || !shown) g_errors++;
         root->setProperty("showRemote", false);
     }
+    {   // typing into an instructions box survives the periodic settings refresh
+        root->setProperty("page", "settings"); settle(150);
+        QObject* box = root->findChild<QObject*>("insGlobal");
+        bool kept = false;
+        if (box) {
+            box->setProperty("text", "Answer in Czech. And always cite sources");
+            QMetaObject::invokeMethod(root, "refresh"); settle(200);
+            QVariant so = root->property("settingsObj"); root->setProperty("settingsObj", so); settle(100);   // a new settings object, as a refresh delivers
+            kept = box->property("text").toString() == "Answer in Czech. And always cite sources" && box->property("dirty").toBool();
+        }
+        fprintf(stderr, "typed instructions kept across refresh: %s\n", kept ? "yes" : "NO");
+        if (!kept) g_errors++;
+    }
     // a chat round trip (the mock's job answers "done")
     root->setProperty("page", "chat");
     QMetaObject::invokeMethod(root, "sendChat", Q_ARG(QVariant, QVariant("Summarize my zine")));
