@@ -103,6 +103,9 @@ int main(int argc, char** argv) {
     json jr = J(core.job(jid));
     CHECK(jr.value("text", "") == "echo: hello world, stream me", "streamed text assembled: " + jr.value("text", std::string()));
     CHECK(jr.contains("usage") && jr["usage"].value("completion_tokens", 0) == 7, "a stream asks for usage (stream_options.include_usage) and gets it");
+    CHECK(jr.contains("stats") && jr["stats"].value("ttftMs", -1) >= 0 && jr["stats"].value("totalMs", -1) >= jr["stats"].value("ttftMs", 0) && jr["stats"]["tokensPerSec"].is_number() && jr["stats"].value("completionTokens", 0) == 7,
+          "speed: time to first token, total time and tokens/s per answer: " + jr["stats"].dump());
+    CHECK(J(core.usage())["models"]["venice/echo"].value("runs", 0) >= 1 && J(core.usage())["models"]["venice/echo"].value("tpsRuns", 0) >= 1, "per-model speed is kept in usage()");
     {
         json rj = J(core.chat("tester", R"({"model":"venice/echo","messages":[{"role":"user","content":"reject-stream-options"}]})"));
         const std::string rid = rj.value("jobId", "");

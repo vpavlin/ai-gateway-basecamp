@@ -44,7 +44,7 @@ public:
     std::string refreshModels();
     // Start a chat completion. caller names the app asking; requestJson is an OpenAI chat request (response_format and tools pass through) plus optional {connector, minPrivacy, responseFormat}. Returns {ok, jobId, watchId, model, connector, privacy} or {ok:false, error}. Keep jobId to yourself: job(jobId) returns the answer; events only carry watchId
     std::string chat(std::string caller, std::string requestJson);
-    // A job: {id, state: running|done|error|cancelled, text, message, model, connector, privacy, usage, error, caller}
+    // A job: {id, state: running|done|error|cancelled, text, message, model, connector, privacy, usage, error, caller, stats?: {ttftMs, totalMs, tokensPerSec, completionTokens, estimated}}
     std::string job(std::string jobId);
     // Stop a running job: {ok}
     std::string cancel(std::string jobId);
@@ -56,7 +56,7 @@ public:
     std::string serverInfo();
     // A new random token for the local endpoint: {ok, token}
     std::string rotateServerToken();
-    // Per-app and per-connector usage: {apps: {...}, connectors: {...}}
+    // Per-app, per-connector and per-model usage: {apps: {...}, connectors: {...}, models: {id: {runs, ttftSumMs, lastTtftMs, tpsRuns, tpsSumX10, lastTps}}}
     std::string usage();
     // Open a conversation the gateway keeps (ADR 0002). caller names the app; sessionJson is {title, model?, minPrivacy?, system?, document?}. Returns {ok, sessionId, model, privacy}. The AI Gateway view calls this after the user allows an ai.session intent
     std::string openSession(std::string caller, std::string sessionJson);

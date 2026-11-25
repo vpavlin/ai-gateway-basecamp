@@ -9,7 +9,7 @@ labelled.
 - **`ai_gateway`** (view): chat, connector onboarding, settings, and the **`ai.ask` / `ai.chat`
   intents** other apps call.
 
-Status: **core 0.1.6, view 0.1.9**. Remote providers are hidden until the user acknowledges a warning (ADR 0003 covers the security review). Source: https://github.com/vpavlin/ai-gateway-basecamp. Issues: https://github.com/vpavlin/ai-gateway-basecamp/issues
+Status: **core 0.1.8, view 0.1.10**. Remote providers are hidden until the user acknowledges a warning (ADR 0003 covers the security review). Source: https://github.com/vpavlin/ai-gateway-basecamp. Issues: https://github.com/vpavlin/ai-gateway-basecamp/issues
 Design: `docs/adr/0001-architecture.md`;
 research: `docs/research-providers.md`, `docs/research-private-relay.md`; open questions:
 `QUESTIONS.md`.
@@ -32,6 +32,10 @@ once: *These run the model on someone else's computer. Each provider makes priva
 guarantee full privacy: your prompts leave this computer, and your IP address, timing, account and payment
 can identify you.* Connectors already added stay visible with a "Remote" badge. An app's request says so
 when the chosen model is remote.
+
+**Speed.** Every answer shows its time to first token, tokens per second and total time (`job().stats`).
+Apps & usage keeps a per-model average measured on this computer, and the model picker shows it ("≈ 42
+tok/s"). Tokens come from the provider's count, or are estimated (≈ 4 characters a token) when it gives none.
 
 **Tested with real accounts:** Venice and Ollama. The others (llama.cpp, LM Studio, NEAR AI, nilAI,
 Morpheus, AkashML) follow each provider's documentation and are marked **Experimental: report issues!** in

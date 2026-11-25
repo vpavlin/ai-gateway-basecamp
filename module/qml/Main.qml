@@ -127,6 +127,27 @@ Item {
         var h = m[1].toLowerCase()
         return h === "localhost" || h === "[::1]" || h.indexOf("127.") === 0
     }
+    // speed of one answer: time to first token, tokens per second, total time
+    function secs(ms) { ms = Number(ms || 0); return ms < 1000 ? ms + " ms" : (ms / 1000).toFixed(ms < 10000 ? 1 : 0) + " s" }
+    function speedText(st) {
+        if (!st) return ""
+        var o = []
+        if (st.ttftMs !== undefined && st.ttftMs !== null) o.push(secs(st.ttftMs) + " to first token")
+        if (typeof st.tokensPerSec === "number") o.push((st.estimated ? "≈ " : "") + st.tokensPerSec + " tok/s")
+        if (st.totalMs) o.push(secs(st.totalMs) + " total")
+        return o.length ? "  ·  " + o.join("  ·  ") : ""
+    }
+    // a model's average speed from usage (models: {id: {runs, ttftSumMs, tpsRuns, tpsSumX10}})
+    function modelSpeed(id) {
+        var m = (usageObj.models || {})[id]; if (!m) return null
+        return { runs: m.runs || 0, ttftMs: m.runs ? Math.round((m.ttftSumMs || 0) / m.runs) : null,
+                 tps: m.tpsRuns ? Math.round((m.tpsSumX10 || 0) / m.tpsRuns) / 10 : null }
+    }
+    function speedMap() {
+        var out = {}, ms = usageObj.models || {}
+        for (var k in ms) { var s = modelSpeed(k); if (s && s.tps !== null) out[k] = s.tps }
+        return out
+    }
     function kchars(n) { n = Number(n || 0); return n < 1000 ? n + " chars" : (n < 1000000 ? Math.round(n / 1000) + " k chars" : (n / 1000000).toFixed(1) + " M chars") }
     function isLocalPreset(p) { return !!p && (p.kind === "local" || p.id === "custom") }
     function localPresets() { return presetList.filter(function (p) { return isLocalPreset(p) }) }
@@ -157,7 +178,7 @@ Item {
             if (u.delta) chatPartial += u.delta
             if (u.state && u.state !== "running") {
                 var msgs = chatMessages.slice()
-                if (u.state === "done") msgs.push({ role: "assistant", content: u.text || chatPartial, model: u.model, privacy: u.privacy })
+                if (u.state === "done") msgs.push({ role: "assistant", content: u.text || chatPartial, model: u.model, privacy: u.privacy, stats: u.stats || null })
                 else msgs.push({ role: "error", content: u.state === "cancelled" ? "Stopped." : (u.error || "failed") })
                 chatMessages = msgs; chatJob = ""; chatPartial = ""
                 refresh()
@@ -184,7 +205,7 @@ Item {
             var v = parse(r); if (!v || !v.ok) return
             if (id !== chatJob && id !== intentJob) return
             var known = id === chatJob ? chatPartial : intentAnswer
-            var u = { state: v.state, text: v.text, model: v.model, connector: v.connector, privacy: v.privacy, error: v.error, usage: v.usage }
+            var u = { state: v.state, text: v.text, model: v.model, connector: v.connector, privacy: v.privacy, error: v.error, usage: v.usage, stats: v.stats }
             if (v.state === "running" && v.text && v.text.length > known.length) u.delta = v.text.substring(known.length)
             if (v.state === "running" && !u.delta) return
             onJobUpdate(id, u)
@@ -332,7 +353,7 @@ Item {
                     Text { textFormat: Text.PlainText; text: "Model"; color: root.cSec }
                     ModelPicker {
                         objectName: "chatPicker"; Layout.preferredWidth: 460
-                        models: root.modelList; pinned: root.pinnedList(); current: root.chatModel
+                        models: root.modelList; pinned: root.pinnedList(); current: root.chatModel; speeds: root.speedMap()
                         onPicked: function (id) { root.chatModel = id }
                         onPinToggled: function (id) { root.togglePin(id) }
                     }
@@ -355,7 +376,7 @@ Item {
                         color: m.role === "user" ? root.cRaised : m.role === "error" ? Theme.colors.getColor(root.cBad, 0.15) : root.cSurface
                         height: body.implicitHeight + meta.implicitHeight + 24
                         Text { textFormat: Text.PlainText; id: meta; x: 12; y: 8; color: root.cTert; font.pixelSize: 11
-                               text: m.role === "user" ? "You" : m.role === "error" ? "Error" : ("AI" + (m.model ? "  ·  " + m.model : "") + (m.privacy ? "  ·  " + (root.tierNames[m.privacy] || m.privacy) : "")) }
+                               text: m.role === "user" ? "You" : m.role === "error" ? "Error" : ("AI" + (m.model ? "  ·  " + m.model : "") + (m.privacy ? "  ·  " + (root.tierNames[m.privacy] || m.privacy) : "") + root.speedText(m.stats)) }
                         TextEdit { id: body; x: 12; y: meta.y + meta.implicitHeight + 4; width: parent.width - 24; readOnly: true; selectByMouse: true
                                    wrapMode: TextEdit.Wrap; color: root.cText; font.pixelSize: 14; text: m.content }
                     }
@@ -571,6 +592,12 @@ Item {
                                   onClicked: root.call("closeSession", [modelData.handle], function () { root.refresh() }) }
                         }
                     }
+                    Text { textFormat: Text.PlainText; visible: Object.keys(root.usageObj.models || {}).length > 0; text: "Speed by model (measured on this computer)"; color: root.cText; font.bold: true; Layout.topMargin: 10 }
+                    Repeater {
+                        model: Object.keys(root.usageObj.models || {})
+                        delegate: Text { textFormat: Text.PlainText; color: root.cSec; property var sp: root.modelSpeed(modelData)
+                                         text: modelData + ": " + (sp.tps !== null ? sp.tps + " tok/s average" : "speed not measured") + (sp.ttftMs !== null ? ", " + root.secs(sp.ttftMs) + " to first token" : "") + " (" + sp.runs + (sp.runs === 1 ? " answer)" : " answers)") }
+                    }
                     Text { textFormat: Text.PlainText; text: "By connector"; color: root.cText; font.bold: true; Layout.topMargin: 10 }
                     Repeater {
                         model: Object.keys(root.usageObj.connectors || {})
@@ -710,6 +737,7 @@ Item {
         property var pinned: []            // [model id]
         property string current: ""
         property string noneLabel: ""      // if set, an extra first row that picks ""
+        property var speeds: ({})          // model id -> average tokens/s measured here
         signal picked(string id)
         signal pinToggled(string id)
         function tierName(t) { return ({ "standard": "Standard", "no-retention": "No retention", "tee": "TEE", "tee-e2ee": "TEE + E2EE", "local": "On this device" })[t] || t || "" }
@@ -772,7 +800,7 @@ Item {
                             Column {
                                 x: 26; anchors.verticalCenter: parent.verticalCenter; width: parent.width - 26 - 40
                                 Text { textFormat: Text.PlainText; text: r.none ? mp.noneLabel : (r.name || ""); color: Theme.palette.text; font.pixelSize: 13; elide: Text.ElideRight; width: parent.width }
-                                Text { textFormat: Text.PlainText; visible: !r.none; text: (r.connectorName || "") + " · " + mp.tierName(r.privacy) + (r.name !== r.id ? " · " + r.id : ""); color: Theme.palette.textTertiary; font.pixelSize: 11; elide: Text.ElideRight; width: parent.width }
+                                Text { textFormat: Text.PlainText; visible: !r.none; text: (r.connectorName || "") + " · " + mp.tierName(r.privacy) + (mp.speeds[r.id] !== undefined ? " · ≈ " + mp.speeds[r.id] + " tok/s" : "") + (r.name !== r.id ? " · " + r.id : ""); color: Theme.palette.textTertiary; font.pixelSize: 11; elide: Text.ElideRight; width: parent.width }
                             }
                             Text { textFormat: Text.PlainText;
                                 visible: !r.none; anchors.right: parent.right; anchors.rightMargin: 12; anchors.verticalCenter: parent.verticalCenter

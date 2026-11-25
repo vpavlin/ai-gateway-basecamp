@@ -21,6 +21,7 @@
 
 #include <algorithm>
 #include <chrono>
+#include <cmath>
 #include <cstdio>
 #include <cstdlib>
 #include <fcntl.h>
@@ -33,7 +34,7 @@
 using json = nlohmann::json;
 
 namespace {
-const char* kVersion = "0.1.7";
+const char* kVersion = "0.1.8";
 
 long long nowMs() {
     return std::chrono::duration_cast<std::chrono::milliseconds>(std::chrono::system_clock::now().time_since_epoch()).count();
@@ -177,6 +178,8 @@ struct AiGatewayCoreImpl::Job {
     std::string pendingDelta;
     long long lastEmitMs = 0;
     long long startedMs = 0, finishedMs = 0;
+    long long firstTokenMs = 0;   // the first piece of the answer arrived (time to first token)
+    json stats = json();          // {ttftMs, totalMs, tokensPerSec, completionTokens, estimated} when done
     std::string sessionId;   // a session turn: on success the turn and the answer join the session's history
     json turn = json();
 };
@@ -248,6 +251,7 @@ void AiGatewayCoreImpl::load() {
     if (!m_usage.is_object()) m_usage = json::object();
     if (!m_usage.contains("apps") || !m_usage["apps"].is_object()) m_usage["apps"] = json::object();
     if (!m_usage.contains("connectors") || !m_usage["connectors"].is_object()) m_usage["connectors"] = json::object();
+    if (!m_usage.contains("models") || !m_usage["models"].is_object()) m_usage["models"] = json::object();
     saveSettings();
 }
 void AiGatewayCoreImpl::saveConnectors() { writePrivateFile(m_dataDir + "/connectors.json", m_connectors.dump(1)); }
@@ -702,6 +706,7 @@ void AiGatewayCoreImpl::onChunk(std::shared_ptr<Job> j, const std::string& data)
     j->sseBuf.erase(0, pos);
     if (j->sseBuf.size() > kMaxSseLine) { j->overLimit = true; j->limitError = "the provider sent an over-long line"; if (j->reply) j->reply->abort(); return; }
     if (delta.empty()) return;
+    if (!j->firstTokenMs) j->firstTokenMs = nowMs();
     j->text += delta;
     j->pendingDelta += delta;
     if (j->text.size() > kMaxAnswerText) { j->overLimit = true; j->limitError = "the answer is too large"; if (j->reply) j->reply->abort(); return; }
@@ -716,6 +721,28 @@ void AiGatewayCoreImpl::finishJob(std::shared_ptr<Job> j, const std::string& sta
     std::lock_guard<std::recursive_mutex> lk(m_mtx);
     if (j->state != "running") return;
     j->state = state; j->error = error; j->finishedMs = nowMs();
+    // speed: time to first token, and generation tokens per second (from the provider's count, else ~4 chars a token)
+    if (j->kind == "chat" && state == "done") {
+        const long long first = j->firstTokenMs ? j->firstTokenMs : j->finishedMs;   // a whole answer at once: first token = the end
+        long long tokens = safeCount(j->usage, "completion_tokens");
+        const bool estimated = tokens == 0;
+        if (estimated) tokens = std::max<long long>(1, (long long)j->text.size() / 4);
+        const long long genMs = j->finishedMs - first;
+        j->stats = {{"ttftMs", first - j->startedMs}, {"totalMs", j->finishedMs - j->startedMs}, {"completionTokens", tokens}, {"estimated", estimated}};
+        // tokens/s only over a real streaming span (>= 50 ms; a one-shot answer has none)
+        j->stats["tokensPerSec"] = (j->firstTokenMs && genMs >= 50 && tokens > 1) ? json(std::round(10.0 * (tokens - 1) * 1000.0 / genMs) / 10.0) : json();
+        json& ms = m_usage["models"][j->model];
+        if (!ms.is_object()) ms = json::object();
+        ms["runs"] = safeCount(ms, "runs") + 1;
+        ms["ttftSumMs"] = safeCount(ms, "ttftSumMs") + (first - j->startedMs);
+        ms["lastTtftMs"] = first - j->startedMs;
+        if (j->stats["tokensPerSec"].is_number()) {
+            ms["tpsRuns"] = safeCount(ms, "tpsRuns") + 1;
+            ms["tpsSumX10"] = safeCount(ms, "tpsSumX10") + (long long)std::llround(j->stats["tokensPerSec"].get<double>() * 10);
+            ms["lastTps"] = j->stats["tokensPerSec"];
+        }
+        saveUsage();
+    }
     if (j->kind == "chat" && state == "done" && j->usage.is_object()) {
         const long long pt = safeCount(j->usage, "prompt_tokens"), ct = safeCount(j->usage, "completion_tokens");
         for (json* u : {&m_usage["apps"][j->caller], &m_usage["connectors"][j->connector]}) {
@@ -747,6 +774,7 @@ void AiGatewayCoreImpl::finishJob(std::shared_ptr<Job> j, const std::string& sta
     if (!j->message.is_null()) up["message"] = j->message;
     if (!j->result.is_null()) up["result"] = j->result;
     up["model"] = j->model; up["connector"] = j->connector; up["privacy"] = j->privacy;
+    if (!j->stats.is_null()) up["stats"] = j->stats;
     notify(j, up);
 }
 void AiGatewayCoreImpl::notify(std::shared_ptr<Job> j, json update) {
@@ -902,6 +930,7 @@ std::string AiGatewayCoreImpl::job(std::string jobId) {
     if (!j->usage.is_null()) o["usage"] = j->usage;
     if (!j->message.is_null()) o["message"] = j->message;
     if (!j->result.is_null()) o["result"] = j->result;
+    if (!j->stats.is_null()) o["stats"] = j->stats;
     return o.dump();
 }
 void AiGatewayCoreImpl::cancelJob(const std::string& id) {

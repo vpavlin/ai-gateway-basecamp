@@ -121,6 +121,20 @@
     "promptTokens": 1200,
     "completionTokens": 600
    }
+  },
+  "models": {
+   "ollama/llama3.2": {
+    "runs": 5,
+    "ttftSumMs": 2100,
+    "tpsRuns": 5,
+    "tpsSumX10": 1930
+   },
+   "venice/venice-uncensored": {
+    "runs": 2,
+    "ttftSumMs": 1800,
+    "tpsRuns": 2,
+    "tpsSumX10": 1240
+   }
   }
  },
  "chat": {
@@ -138,7 +152,14 @@
   "text": "Here is a short summary:\n- The zine is about gardens.\n- It has 12 pages.",
   "model": "ollama/llama3.2",
   "connector": "ollama",
-  "privacy": "local"
+  "privacy": "local",
+  "stats": {
+   "ttftMs": 420,
+   "totalMs": 2150,
+   "tokensPerSec": 38.6,
+   "completionTokens": 67,
+   "estimated": false
+  }
  },
  "openSession": {
   "ok": true,
