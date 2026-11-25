@@ -85,6 +85,12 @@
   "server": {
    "enabled": true,
    "port": 11500
+  },
+  "instructions": {
+   "global": "Answer in Czech.",
+   "apps": {
+    "wb_feedback_demo": "Use bullet points."
+   }
   }
  },
  "serverInfo": {

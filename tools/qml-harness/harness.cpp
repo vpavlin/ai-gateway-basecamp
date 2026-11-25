@@ -153,6 +153,13 @@ int main(int argc, char** argv) {
     emit logos.intentRequested("req-1", "ai.ask", params, "wb_feedback_demo");
     settle(300);
     view.grabWindow().save(out + "/intent-ask.png");
+    {   // the consent preview shows the user's own instructions (global + this app's), where the core puts them
+        QVariant pm; QMetaObject::invokeMethod(root, "previewMessages", Q_RETURN_ARG(QVariant, pm));
+        const QString pj = QString::fromUtf8(QJsonDocument::fromVariant(pm.value<QJSValue>().toVariant()).toJson(QJsonDocument::Compact));
+        const bool shown = pj.contains("your instructions") && pj.contains("Answer in Czech.") && pj.contains("Use bullet points.");
+        fprintf(stderr, "instructions in preview: %s\n", shown ? "yes" : qPrintable("NO " + pj));
+        if (!shown) g_errors++;
+    }
     root->setProperty("intentModel", "venice/venice-uncensored"); settle(150);
     view.grabWindow().save(out + "/intent-remote.png");
     root->setProperty("intentModel", "ollama/llama3.2"); settle(50);

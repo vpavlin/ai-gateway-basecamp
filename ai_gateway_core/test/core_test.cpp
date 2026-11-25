@@ -202,6 +202,13 @@ int main(int argc, char** argv) {
         CHECK(t5.find(" ctx") == std::string::npos, "and is not kept in the history: " + t5);
         const std::string t6 = turn(R"({"message":"plan","responseFormat":{"type":"json_schema","json_schema":{"name":"plan","schema":{"type":"object"}}}})");
         CHECK(t6.find("json_schema") != std::string::npos && t6.find("plan") != std::string::npos, "responseFormat goes to the provider as response_format: " + t6);
+        // the user's own instructions: global + for this app, after the app's system prompt
+        CHECK(J(core.setSettings(R"({"instructions":{"global":"Answer in Czech.","apps":{"fileverse_ui":"Be terse."}}})")).value("ok", false), "instructions can be set");
+        const std::string ti = turn(R"({"message":"inspect"})");
+        CHECK(ti.rfind("roles=system,system,", 0) == 0, "the user's instructions come right after the app's system prompt: " + ti);
+        CHECK(J(core.setSettings(R"({"instructions":{"apps":{"fileverse_ui":""}}})")).value("ok", false) && !J(core.settings())["instructions"]["apps"].contains("fileverse_ui") && J(core.settings())["instructions"].value("global", "") == "Answer in Czech.", "\"\" removes one app's instructions, the rest stay");
+        CHECK(!J(core.setSettings(R"({"instructions":{"global":7}})")).value("ok", true), "instructions must be text");
+        core.setSettings(R"({"instructions":{"global":""}})");
         const std::string t7 = turn(R"({"message":"inspect","resetHistory":true})");
         CHECK(t7.rfind("roles=system,user ", 0) == 0, "resetHistory starts the history over: " + t7);
         CHECK(J(core.sessionChat(sid, R"({"message":"x","historyChars":-1})")).value("ok", true) == false, "historyChars is checked");

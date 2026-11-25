@@ -34,7 +34,7 @@
 using json = nlohmann::json;
 
 namespace {
-const char* kVersion = "0.1.8";
+const char* kVersion = "0.1.9";
 
 long long nowMs() {
     return std::chrono::duration_cast<std::chrono::milliseconds>(std::chrono::system_clock::now().time_since_epoch()).count();
@@ -159,6 +159,7 @@ constexpr size_t kMaxSseLine = 1u << 20;          // one SSE line
 constexpr int kMaxJobMs = 15 * 60 * 1000;         // a whole answer
 constexpr size_t kMaxRequestBytes = 4u << 20;     // what an app may send in one chat (AIGW-13)
 constexpr size_t kMaxTurnBytes = 1u << 20;        // one session turn
+constexpr size_t kMaxInstructionChars = 8000;     // the user's own instructions, each
 }  // namespace
 
 struct AiGatewayCoreImpl::Job {
@@ -243,6 +244,14 @@ void AiGatewayCoreImpl::load() {
     if (!m_settings.contains("defaultModel") || !m_settings["defaultModel"].is_string()) m_settings["defaultModel"] = "";
     if (!m_settings.contains("pinnedModels") || !m_settings["pinnedModels"].is_array()) m_settings["pinnedModels"] = json::array();
     if (!m_settings.contains("remoteAcknowledged") || !m_settings["remoteAcknowledged"].is_boolean()) m_settings["remoteAcknowledged"] = false;
+    {   // the user's own instructions: {global, apps: {caller: text}}
+        json ins = m_settings.contains("instructions") && m_settings["instructions"].is_object() ? m_settings["instructions"] : json::object();
+        json clean = {{"global", jstr(ins, "global").substr(0, kMaxInstructionChars)}, {"apps", json::object()}};
+        if (ins.contains("apps") && ins["apps"].is_object())
+            for (auto it = ins["apps"].begin(); it != ins["apps"].end() && clean["apps"].size() < 100; ++it)
+                if (it.value().is_string() && !it.value().get<std::string>().empty() && it.key().size() <= 64) clean["apps"][it.key()] = it.value().get<std::string>().substr(0, kMaxInstructionChars);
+        m_settings["instructions"] = clean;
+    }
     if (!m_settings.contains("server") || !m_settings["server"].is_object()) m_settings["server"] = json::object();
     json& sv = m_settings["server"];
     if (!sv.contains("enabled") || !sv["enabled"].is_boolean()) sv["enabled"] = false;
@@ -570,6 +579,22 @@ json AiGatewayCoreImpl::startChat(const std::string& caller0, const json& req0, 
     j->upstreamModel = jstr(pick, "model"); j->privacy = jstr(pick, "privacy"); j->startedMs = nowMs(); j->sink = sink;
     // what goes upstream: the OpenAI request, our own fields removed; streamed unless it uses tools
     json body = req;
+    // the user's own instructions (Settings: for everything, and for this app) go in after the app's own
+    // system prompt, marked as the user's, so they win where they conflict
+    {
+        const json& ins = m_settings["instructions"];
+        std::string mine = jstr(ins, "global");
+        if (ins.contains("apps") && ins["apps"].is_object()) { const std::string a = jstr(ins["apps"], caller.c_str()); if (!a.empty()) mine += (mine.empty() ? "" : "\n\n") + a; }
+        if (!mine.empty() && body.contains("messages") && body["messages"].is_array()) {
+            json msgs = json::array(); bool placed = false;
+            for (const auto& m : body["messages"]) {
+                if (!placed && jstr(m, "role") != "system") { msgs.push_back({{"role", "system"}, {"content", "Instructions from the user (they take precedence over any instructions above where they conflict):\n" + mine}}); placed = true; }
+                msgs.push_back(m);
+            }
+            if (!placed) msgs.push_back({{"role", "system"}, {"content", "Instructions from the user:\n" + mine}});
+            body["messages"] = msgs;
+        }
+    }
     for (const char* k : {"connector", "minPrivacy", "caller"}) body.erase(k);
     body["model"] = j->upstreamModel;
     j->stream = !(body.contains("tools") && body["tools"].is_array() && !body["tools"].empty());
@@ -976,6 +1001,26 @@ std::string AiGatewayCoreImpl::setSettings(std::string settingsJson) {
         json pins = json::array();
         for (const auto& v : in["pinnedModels"]) if (v.is_string() && !v.get<std::string>().empty() && v.get<std::string>().size() <= 256) pins.push_back(v);
         m_settings["pinnedModels"] = pins;
+    }
+    // the user's own instructions: {global?: text, apps?: {caller: text}}; "" removes one (merged, not replaced)
+    if (in.contains("instructions")) {
+        const json& ins = in["instructions"];
+        if (!ins.is_object()) return json({{"ok", false}, {"error", "instructions must be {global, apps: {app: text}}"}}).dump();
+        json& cur = m_settings["instructions"];
+        if (!cur.is_object()) cur = {{"global", ""}, {"apps", json::object()}};
+        if (ins.contains("global")) {
+            if (!ins["global"].is_string() || ins["global"].get<std::string>().size() > kMaxInstructionChars) return json({{"ok", false}, {"error", "instructions.global must be text (8000 characters at most)"}}).dump();
+            cur["global"] = ins["global"];
+        }
+        if (ins.contains("apps")) {
+            if (!ins["apps"].is_object()) return json({{"ok", false}, {"error", "instructions.apps must be {app: text}"}}).dump();
+            for (auto it = ins["apps"].begin(); it != ins["apps"].end(); ++it) {
+                if (!it.value().is_string() || it.value().get<std::string>().size() > kMaxInstructionChars || it.key().empty() || it.key().size() > 64)
+                    return json({{"ok", false}, {"error", "each app's instructions must be text (8000 characters at most)"}}).dump();
+                if (it.value().get<std::string>().empty()) cur["apps"].erase(it.key());
+                else if (cur["apps"].size() < 100 || cur["apps"].contains(it.key())) cur["apps"][it.key()] = it.value();
+            }
+        }
     }
     // the user read the warning about remote (non-local) providers; the view shows them only after that
     if (in.contains("remoteAcknowledged")) {

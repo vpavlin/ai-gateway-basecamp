@@ -60,7 +60,8 @@ Item {
     property string intentJob: ""
     property string intentWatch: ""
     property string intentAnswer: ""
-    property string intentState: ""       // "", ask, running, done, error
+    property string intentState: ""
+    property var intentStats: null       // "", ask, running, done, error
 
     readonly property var tierNames: ({ "standard": "Standard", "no-retention": "No retention", "tee": "TEE", "tee-e2ee": "TEE + E2EE", "local": "On this device" })
     readonly property var tierHelp: ({
@@ -189,7 +190,7 @@ Item {
             if (u.state && u.state !== "running") {
                 intentJob = ""
                 if (u.state === "done") {
-                    intentAnswer = u.text || intentAnswer; intentState = "done"
+                    intentAnswer = u.text || intentAnswer; intentState = "done"; intentStats = u.stats || null
                     var m = modelById(u.model)
                     finishIntent(true, { text: intentAnswer, model: u.model || "", connector: u.connector || "", privacy: u.privacy || "", usage: u.usage || {} }, "")
                 } else { intentState = "error"; intentAnswer = u.error || u.state; finishIntent(false, { message: String(u.error || u.state).substring(0, 300) }, u.state === "cancelled" ? "cancelled" : "failed") }
@@ -217,6 +218,36 @@ Item {
     }
 
     // ── intents (ai.ask / ai.chat) ──
+    // the user's own instructions for an app (Settings): what the core adds to every request it sends
+    function instructionsFor(app) {
+        var ins = settingsObj.instructions || {}, g = String(ins.global || ""), a = String((ins.apps || {})[app] || "")
+        return g && a ? g + "\n\n" + a : (g || a)
+    }
+    // the consent preview: exactly what goes to the model, including the user's own instructions,
+    // placed where the core puts them (after the app's system prompt)
+    function previewMessages() {
+        var ms = intentMessages().slice(), mine = instructionsFor(intentFrom)
+        if (!mine) return ms
+        var i = 0; while (i < ms.length && ms[i].role === "system") i++
+        ms.splice(i, 0, { role: "your instructions", content: mine })
+        return ms
+    }
+    function saveInstructions(app, text) {
+        var ins = app ? { apps: {} } : { global: String(text) }
+        if (app) ins.apps[app] = String(text)
+        call("setSettings", [JSON.stringify({ instructions: ins })], function (r) {
+            var v = parse(r)
+            if (v && v.ok) { toast(text ? "Instructions saved" : "Instructions removed"); refresh() } else toast(v && v.error ? v.error : "couldn't save")
+        })
+    }
+    // apps that can have their own instructions: the built-in chat, apps that have asked, and any with instructions already
+    function instructionApps() {
+        var names = ["ai_gateway"], add = function (n) { if (n && names.indexOf(n) < 0) names.push(n) }
+        for (var k in (usageObj.apps || {})) if (k !== "local endpoint") add(k)
+        for (var a in ((settingsObj.instructions || {}).apps || {})) add(a)
+        for (var i = 0; i < sessionList.length; i++) add(sessionList[i].caller)
+        return names
+    }
     function intentMessages() {
         var p = intentParams
         if (intentName === "ai.chat") return p.messages || []
@@ -236,7 +267,7 @@ Item {
     function startIntent(requestId, intent, params, requester) {
         if (intentId) finishIntent(false, {}, "cancelled")   // a new ask replaces the old
         intentId = requestId; intentName = intent; intentFrom = requester || "an app"; intentParams = params || {}
-        intentAnswer = ""; intentJob = ""; intentState = "ask"
+        intentAnswer = ""; intentJob = ""; intentState = "ask"; intentStats = null
         var want = params && params.model ? String(params.model) : ""
         var floor = intentFloor()
         var m = want ? modelById(want) : null
@@ -627,6 +658,31 @@ Item {
                         onPicked: function (id) { root.call("setSettings", [JSON.stringify({ defaultModel: id })], function () { root.refresh() }) }
                         onPinToggled: function (id) { root.togglePin(id) }
                     }
+                    // ── the user's own instructions ──
+                    Text { textFormat: Text.PlainText; text: "Your instructions"; color: root.cText; font.bold: true; Layout.topMargin: 14 }
+                    Text { textFormat: Text.PlainText; Layout.fillWidth: true; wrapMode: Text.Wrap; color: root.cSec; font.pixelSize: 12
+                           text: "Added to every request after the app's own instructions, marked as yours, so they win where they conflict. Apps can't see or change them; they show in the preview when an app asks." }
+                    Text { textFormat: Text.PlainText; text: "For everything"; color: root.cSec; font.pixelSize: 12; Layout.topMargin: 4 }
+                    LogosTextArea {
+                        id: insGlobal; objectName: "insGlobal"; Layout.fillWidth: true; Layout.preferredHeight: 80; wrapMode: TextArea.Wrap
+                        placeholderText: "e.g. Answer in Czech. Be brief. Never make up facts."
+                        text: (root.settingsObj.instructions || {}).global || ""
+                    }
+                    Btn { text: "Save"; onClicked: root.saveInstructions("", insGlobal.text.trim()) }
+                    Text { textFormat: Text.PlainText; text: "For one app"; color: root.cSec; font.pixelSize: 12; Layout.topMargin: 8 }
+                    Repeater {
+                        model: root.instructionApps()
+                        delegate: ColumnLayout {
+                            Layout.fillWidth: true; spacing: 4
+                            Text { textFormat: Text.PlainText; text: modelData === "ai_gateway" ? "Chat here (AI Gateway)" : modelData; color: root.cText; font.pixelSize: 13 }
+                            LogosTextArea {
+                                id: insApp; Layout.fillWidth: true; Layout.preferredHeight: 60; wrapMode: TextArea.Wrap
+                                placeholderText: modelData === "ai_gateway" ? "e.g. You are my writing assistant." : "e.g. Keep suggestions short; British spelling."
+                                text: ((root.settingsObj.instructions || {}).apps || {})[modelData] || ""
+                            }
+                            Btn { text: "Save"; onClicked: root.saveInstructions(modelData, insApp.text.trim()) }
+                        }
+                    }
                     Text { textFormat: Text.PlainText; text: "Local OpenAI endpoint"; color: root.cText; font.bold: true; Layout.topMargin: 14 }
                     Text { textFormat: Text.PlainText; Layout.fillWidth: true; wrapMode: Text.Wrap; color: root.cSec; font.pixelSize: 12
                            text: "Lets tools outside Basecamp (editors, agents, scripts) use these models as an OpenAI endpoint on this computer only (127.0.0.1), with the token below." }
@@ -662,7 +718,7 @@ Item {
                         implicitHeight: Math.min(prev.implicitHeight + 20, 300)
                         Flickable { anchors.fill: parent; anchors.margins: 10; contentHeight: prev.implicitHeight; clip: true
                             TextEdit { id: prev; width: parent.width; readOnly: true; selectByMouse: true; wrapMode: TextEdit.Wrap; color: root.cText; font.pixelSize: 13
-                                       text: root.intentMessages().map(function (m) { return "[" + m.role + "] " + (typeof m.content === "string" ? m.content : JSON.stringify(m.content)) }).join("\n\n") } }
+                                       text: root.previewMessages().map(function (m) { return "[" + m.role + "] " + (typeof m.content === "string" ? m.content : JSON.stringify(m.content)) }).join("\n\n") } }
                     }
                     Text { textFormat: Text.PlainText; color: root.cSec; text: "The app asks for at least: " + (root.tierNames[root.intentFloor()] || root.intentFloor()) }
                     Text {
@@ -686,7 +742,7 @@ Item {
                         Btn { primary: true; text: root.intentName === "ai.session" ? "Allow this chat" : "Run"; enabled: !!root.intentModel; onClicked: root.runIntent() }
                         Btn { text: "Decline"; onClicked: root.declineIntent() }
                     }
-                    Text { textFormat: Text.PlainText; visible: root.intentState !== "ask" && root.intentState !== ""; text: root.intentState === "running" ? "Answering…" : root.intentState === "done" ? (root.intentName === "ai.session" ? "Chat allowed" : "Answer sent back to " + root.intentFrom) : "Failed"; color: root.intentState === "error" ? root.cBad : root.cSec }
+                    Text { textFormat: Text.PlainText; visible: root.intentState !== "ask" && root.intentState !== ""; text: root.intentState === "running" ? "Answering…" : root.intentState === "done" ? (root.intentName === "ai.session" ? "Chat allowed" : "Answer sent back to " + root.intentFrom + root.speedText(root.intentStats)) : "Failed"; color: root.intentState === "error" ? root.cBad : root.cSec }
                     TextEdit { visible: root.intentAnswer !== ""; Layout.fillWidth: true; readOnly: true; selectByMouse: true; wrapMode: TextEdit.Wrap; color: root.cText; font.pixelSize: 14; text: root.intentAnswer }
                     Btn { visible: root.intentState === "running"; text: "Stop"; onClicked: root.declineIntent() }
                     Btn { visible: root.intentState === "done" || root.intentState === "error"; text: "Close"; onClicked: { root.intentState = ""; root.page = "chat" } }

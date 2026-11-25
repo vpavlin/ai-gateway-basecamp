@@ -9,7 +9,7 @@ labelled.
 - **`ai_gateway`** (view): chat, connector onboarding, settings, and the **`ai.ask` / `ai.chat`
   intents** other apps call.
 
-Status: **core 0.1.8, view 0.1.10**. Remote providers are hidden until the user acknowledges a warning (ADR 0003 covers the security review). Source: https://github.com/vpavlin/ai-gateway-basecamp. Issues: https://github.com/vpavlin/ai-gateway-basecamp/issues
+Status: **core 0.1.9, view 0.1.11**. Remote providers are hidden until the user acknowledges a warning (ADR 0003 covers the security review). Source: https://github.com/vpavlin/ai-gateway-basecamp. Issues: https://github.com/vpavlin/ai-gateway-basecamp/issues
 Design: `docs/adr/0001-architecture.md`;
 research: `docs/research-providers.md`, `docs/research-private-relay.md`; open questions:
 `QUESTIONS.md`.
@@ -32,6 +32,11 @@ once: *These run the model on someone else's computer. Each provider makes priva
 guarantee full privacy: your prompts leave this computer, and your IP address, timing, account and payment
 can identify you.* Connectors already added stay visible with a "Remote" badge. An app's request says so
 when the chosen model is remote.
+
+**Your instructions.** Settings → Your instructions: text for everything, and per app (the built-in chat,
+Fileverse, Basecamp Voice…). The core adds it to every request after the app's own system prompt, marked
+as the user's, so it wins where they conflict. Apps can't read or change it. When an app asks, the consent
+preview shows it as part of what is sent.
 
 **Speed.** Every answer shows its time to first token, tokens per second and total time (`job().stats`).
 Apps & usage keeps a per-model average measured on this computer, and the model picker shows it ("≈ 42
