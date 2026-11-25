@@ -168,6 +168,7 @@ struct AiGatewayCoreImpl::Job {
     bool usageAsked = false;
     bool sawEnd = false;       // [DONE] or a finish_reason: the stream really ended (AIGW-12)
     bool overLimit = false;    // aborted for a size or time limit
+    bool userCancelled = false; // cancel() was called (a Qt transfer timeout aborts the same way)
     std::string limitError;
     std::string watch;         // the public id in jobUpdate events; the job id itself stays with the caller (AIGW-3)   // stream_options.include_usage was added (dropped once if the provider refuses it)
     json result = json();    // test jobs: the connector's model list
@@ -605,7 +606,7 @@ void AiGatewayCoreImpl::runChat(std::shared_ptr<Job> j, json body) {
     rq.setHeader(QNetworkRequest::ContentTypeHeader, "application/json");
     if (!jstr(c, "apiKey").empty()) rq.setRawHeader("Authorization", QByteArray::fromStdString("Bearer " + jstr(c, "apiKey")));
     rq.setRawHeader("Accept", j->stream ? "text/event-stream" : "application/json");
-    rq.setTransferTimeout(120000);   // no byte for 2 minutes: give up
+    rq.setTransferTimeout(300000);   // no byte for 5 minutes: give up (a busy local model may queue requests)
     QNetworkReply* r = m_net->post(rq, QByteArray::fromStdString(body.dump()));
     { std::lock_guard<std::recursive_mutex> lk(m_mtx); j->reply = r; }
     // limits (AIGW-7): bytes on the wire, and the whole answer's time
@@ -626,8 +627,11 @@ void AiGatewayCoreImpl::runChat(std::shared_ptr<Job> j, json body) {
         const std::string rest = r->readAll().toStdString();
         { std::lock_guard<std::recursive_mutex> lk(m_mtx); j->reply = nullptr; if (j->state != "running") return; }
         if (r->error() == QNetworkReply::OperationCanceledError) {
-            std::string why; { std::lock_guard<std::recursive_mutex> lk(m_mtx); if (j->overLimit) why = j->limitError; }
-            if (!why.empty()) finishJob(j, "error", why); else finishJob(j, "cancelled", "");
+            std::string why; bool user = false;
+            { std::lock_guard<std::recursive_mutex> lk(m_mtx); if (j->overLimit) why = j->limitError; user = j->userCancelled; }
+            if (!why.empty()) finishJob(j, "error", why);
+            else if (user) finishJob(j, "cancelled", "");
+            else finishJob(j, "error", "no answer from the provider for 5 minutes (it may be busy)");   // Qt's transfer timeout
             return;
         }
         { std::lock_guard<std::recursive_mutex> lk(m_mtx); if (j->overLimit) { const std::string why = j->limitError; finishJob(j, "error", why); return; } }
@@ -935,7 +939,7 @@ std::string AiGatewayCoreImpl::job(std::string jobId) {
 }
 void AiGatewayCoreImpl::cancelJob(const std::string& id) {
     std::shared_ptr<Job> j;
-    { std::lock_guard<std::recursive_mutex> lk(m_mtx); auto it = m_jobs.find(id); if (it == m_jobs.end()) return; j = it->second; }
+    { std::lock_guard<std::recursive_mutex> lk(m_mtx); auto it = m_jobs.find(id); if (it == m_jobs.end()) return; j = it->second; j->userCancelled = true; }
     post([this, j] {
         QNetworkReply* r = nullptr;
         { std::lock_guard<std::recursive_mutex> lk(m_mtx); r = j->reply; }
