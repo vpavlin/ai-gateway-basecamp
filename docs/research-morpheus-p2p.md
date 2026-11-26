@@ -207,3 +207,54 @@ Unverified: I read the code; I didn't run a C-node or P-node, or open a session 
   - libp2p (hole punching, relays) only matters for providers behind NAT;
   - Delivery for the control plane now; whether the data plane can also go over Delivery waits for the future
     RLN limits. The transport stays swappable.
+
+## Positioning: what Delivery gives, even before RLN is settled (2026-11-26)
+
+**Today's flow, and what each step reveals:**
+
+| Step | How | Who learns what |
+|---|---|---|
+| Find providers | read the chain (Base): `ProviderRegistry` endpoints, `Marketplace` bids, via an RPC node or blockscout | the RPC/indexer operator sees what you look up |
+| Check a provider | direct TCP to its `host:port`: `network.ping`, `network.capabilities` | the provider and any network observer see your IP probing it |
+| Get an approval | direct TCP `session.request` (names your wallet) | the provider links your IP + wallet |
+| Open a session | `SessionRouter.openSession` transaction | **public forever:** your wallet ↔ provider ↔ stake |
+| Prompts / answers | direct TCP, **no TLS**; answers ECIES-encrypted to you; prompts encrypted **only if** the provider advertises `prompt-enc:ecies` **and the capability lookup succeeds** | otherwise prompts cross the network in plaintext |
+
+**Security finding (verified in `proxy_sender.go` `decidePromptEncryption`, worth telling Morpheus privately):**
+- When the capability lookup fails, the consumer sends the prompt **unencrypted**. An on-path attacker who
+  breaks `network.capabilities` can downgrade any session to plaintext prompts, and plain TCP gives them that
+  path.
+- The fix is theirs and small: refuse to send unencrypted, or at least never downgrade on a failed lookup.
+
+**With Delivery for the control plane only (data still direct):**
+
+For Morpheus:
+1. **Live discovery without gas:** providers announce models, prices, capacity, health and TEE attestations on
+   a topic, signed by their on-chain key. Consumers browse by listening, which says nothing about them; there
+   is no RPC query to log. The chain stays the source of truth for stakes and sessions.
+2. **Private comparison shopping:** ping, capabilities and approval quotes go over Delivery, so the provider
+   sees no IP until you choose it. You can probe ten providers and reveal nothing to the nine you don't pick.
+3. **No downgrade:** Delivery carries the ECIES-sealed, signed messages, so the control plane is
+   encrypted end to end by construction. The pitch also fixes the finding above.
+4. **Censorship resistance for the control plane:** there's no fixed endpoint list to block.
+
+**What it does NOT give while the data plane is direct and payment is on-chain:**
+- Once you use a provider, it sees your IP (direct connection).
+- The chain links your wallet to it.
+
+So control-plane Delivery protects browsing, not usage.
+
+**What the full benefit needs** (the roadmap pitch to both):
+- **The data plane over Delivery or dedicated relays:** NAT-ed providers can serve (home GPUs, a supply-side
+  win for Morpheus), and the provider never sees the consumer's IP. Needs the RLN answer.
+- **Payment unlinkability:**
+  - Morpheus already has delegation (`_validateDelegatee`), but the session still names the user;
+  - a pool/relay that opens sessions and is paid with blind tokens breaks the wallet↔provider link
+    (`research-private-relay.md`).
+- **Mix,** for sender anonymity once it carries bigger messages.
+
+**For Logos:**
+- a real, non-chat workload on Delivery (and later Mix) with paying users;
+- concrete RLN sizing data for streaming;
+- Basecamp as a first-class Morpheus client (via AI Gateway), and a privacy story ("private AI") that only
+  the Logos stack can tell end to end.
