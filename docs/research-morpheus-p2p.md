@@ -190,3 +190,20 @@ Unverified: I read the code; I didn't run a C-node or P-node, or open a session 
 3. A control plane over Delivery with the p-bridge.
 4. A direct libp2p data plane with dedicated relays.
 5. A LEZ port, as research.
+
+## Decisions (2026-11-26, Václav)
+
+- **Connector modules are listed as `optional_dependencies` of `ai_gateway_core`** (the known ones). The user
+  installs the ones they want; AI Gateway probes each with an async call (empty or error = not installed), like
+  WhisperBox does with loam_core.
+  - Calling undeclared modules works in Basecamp 0.3.2 but may be blocked later for security, so don't build
+    on it.
+- **"Our own Morpheus node"** means we run a Morpheus provider ourselves (a P-node in front of our own model)
+  and, as needed, a consumer node: a full testnet marketplace loop we control. It does NOT mean reworking the
+  Ollama/llama.cpp connectors.
+- **Transport:**
+  - for providers with a public IP, the direct TCP Morpheus uses today is enough: messages are already signed
+    and encrypted, so libp2p adds little there;
+  - libp2p (hole punching, relays) only matters for providers behind NAT;
+  - Delivery for the control plane now; whether the data plane can also go over Delivery waits for the future
+    RLN limits. The transport stays swappable.
