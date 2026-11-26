@@ -1,7 +1,12 @@
 # Morpheus over Logos Delivery / Mix: what the code does, what would change
 
 2026-11-26. Source: `github.com/MorpheusAIs/Morpheus-Lumerin-Node` @ `1b0ce5f` (v7.20.0, 2026-11-18). The node
-is `proxy-router/` (Go). Its contracts are in `smart-contracts/` (Arbitrum, diamond facets).
+is `proxy-router/` (Go). Its contracts are in `smart-contracts/` (a diamond, ~1,900 lines of core Solidity).
+
+**Chain correction (checked 2026-11-26):** Morpheus runs on **Base**, not Arbitrum.
+- Mainnet: chain 8453, diamond `0x6aBE1d28…3030a`, MOR `0x7431aDa8…2b8e3`.
+- **Testnet: Base Sepolia**, chain 84532, diamond `0xA328196f…c27c85`, MOR `0x5C80Ddd1…FfA3`.
+- Their docs point to a Base Sepolia faucet for test ETH, but say nothing about getting test MOR.
 
 ## How a request travels today
 
@@ -11,7 +16,7 @@ AI Gateway ──HTTP──> api.mor.org (Morpheus API gateway, API key + credit
 consumer node (C-node, proxy-router) ──TCP──> provider node (P-node, proxy-router) ──HTTP──> the provider's LLM
 ```
 
-**1. Discovery and payment are on-chain (Arbitrum).**
+**1. Discovery and payment are on-chain (Base).**
 - `ProviderRegistry.providerRegister(provider, amount, endpoint)`: the provider stakes MOR and publishes an
   `endpoint`, a free-form string (`host:port` today).
 - `ModelRegistry` and `Marketplace` hold models and bids (price per second).
@@ -95,7 +100,7 @@ Its parts:
   - secp256k1 signing (we have it in WhisperBox and loam);
   - ECIES as go-ethereum implements it (`crypto/ecies`: secp256k1, AES-128-CTR + HMAC-SHA256);
   - the message set above;
-  - **Arbitrum calls** to discover bids and open/close sessions (an RPC endpoint, an MOR approve, a signed
+  - **Base (EVM) calls** to discover bids and open/close sessions (an RPC endpoint, an MOR approve, a signed
     `openSession` transaction).
 
   It's the bigger job (weeks), and puts a wallet in the gateway.
@@ -123,4 +128,65 @@ Its parts:
 3. **Privacy beyond transport waits for payment unlinkability and Mix.** Without those, P2P transport buys
    reachability and censorship-resistance, not anonymity.
 
-Unverified: I read the code; I didn't run a C-node or P-node, or open a session on Arbitrum.
+Unverified: I read the code; I didn't run a C-node or P-node, or open a session on chain.
+
+## Design round 2 (2026-11-26, with Václav)
+
+**1. Connectors as Basecamp modules, not code inside AI Gateway.**
+- A provider that needs its own protocol (Morpheus, later others) becomes its own core module that AI Gateway
+  calls. `ai_gateway_core` stays a router with privacy rules, consent and UI.
+- A connector module implements a small contract, **`ai-connector/1`**, the same shape as `ai-session/1`:
+  - `describe()` → `{name, privacy, needsSetup, setupHints}`;
+  - `models()`;
+  - `chat(requestJson)` → `{jobId}`, then `job`, `jobDelta`, `cancel`.
+- AI Gateway discovers connector modules by name (a module that `provides` a connector marker, or a list in
+  settings). It calls them like Fileverse calls the gateway; Basecamp 0.3.2 allows calling an undeclared core.
+- The built-in llama.cpp model planned from Basecamp Voice's code fits the same shape (`local_llm_core`), as do
+  any future providers.
+- `morpheus_core` options:
+  - (a) supervise Morpheus's own Go proxy-router as a child process and talk to its local consumer API (fast to
+    build, pinned binary, like the llama-server plan);
+  - (b) later, speak MOR-RPC natively.
+- The wallet should come from a wallet module (Keycard or a LEZ/EVM wallet module), not live inside the
+  connector.
+
+**2. A full loop on the testnet with our own model.**
+- Run **our own provider**: a P-node in front of Ollama on a box we control, registered on Base Sepolia.
+- Basecamp is the consumer. Inference is free, and only test tokens move.
+- Test MOR: either ask Morpheus for a test MOR drip, or **redeploy their contracts** on Base Sepolia (or a
+  local Anvil chain) with our own mintable MOR. The repo has the Hardhat deploy; the core Solidity is about
+  1,900 lines (SessionRouter 561, Marketplace 161, registries, delegation).
+  - Then point C-node and P-node at our diamond and MOR addresses (env `DIAMOND_CONTRACT_ADDRESS`,
+    `MOR_TOKEN_ADDRESS`, `ETH_NODE_CHAIN_ID`).
+  - That's the fastest path with zero dependence on them.
+- **LEZ port:** the logic is small (registry, bids, staked sessions with claims). Porting it to LEZ programs
+  (RISC0/Rust, a different account model) is a real but bounded project.
+  - The catch: proxy-router speaks EVM through go-ethereum, so it would need a chain adapter too.
+  - A good second track after the EVM-testnet loop works; not the first step.
+
+**3. Control plane over Delivery, data plane direct.**
+- **Control plane over Logos Delivery:** discovery hints, ping, capabilities, `session.request` / signed
+  approval, key exchange.
+  - A handful of messages per session, well inside an RLN budget.
+- **Data plane, the prompt and the streamed answer, over a direct connection:**
+  - **Public-IP providers already work:** today's registry `endpoint` is a public `host:port`, and the C-node
+    dials it directly, so plain direct TCP needs no new transport.
+  - **What libp2p adds:** NAT traversal (hole punching / DCUtR) for providers at home, Noise-encrypted
+    connections bound to a peer id, and **circuit relays** when punching fails.
+  - The Logos stack already ships a `libp2p_module` (delivery_module lists it as an optional dependency);
+    its API is to be checked.
+- **Relays:** libp2p circuit relay v2 defaults cap a relayed connection at 128 KiB / 2 min. That's the same
+  limit that broke NAT↔NAT Storage transfers (memory `storage-relay-batch-limit`). So AI streams need
+  **dedicated relays with raised limits**, run by us or by providers.
+  - These are not Waku relays, so RLN doesn't apply.
+- **This avoids RLN for the bulk traffic. Trade-off:**
+  - a direct connection shows the consumer's and the provider's IPs to each other;
+  - a relay hides them from each other but not from the relay.
+  - Anonymity stays a Mix + payment-unlinkability question.
+
+**Suggested order:**
+1. `ai-connector/1` + `morpheus_core` supervising a pinned proxy-router.
+2. Our own contracts + our own P-node on Base Sepolia or Anvil.
+3. A control plane over Delivery with the p-bridge.
+4. A direct libp2p data plane with dedicated relays.
+5. A LEZ port, as research.
