@@ -218,13 +218,9 @@ Unverified: I read the code; I didn't run a C-node or P-node, or open a session 
 | Check a provider | direct TCP to its `host:port`: `network.ping`, `network.capabilities` | the provider and any network observer see your IP probing it |
 | Get an approval | direct TCP `session.request` (names your wallet) | the provider links your IP + wallet |
 | Open a session | `SessionRouter.openSession` transaction | **public forever:** your wallet ↔ provider ↔ stake |
-| Prompts / answers | direct TCP, **no TLS**; answers ECIES-encrypted to you; prompts encrypted **only if** the provider advertises `prompt-enc:ecies` **and the capability lookup succeeds** | otherwise prompts cross the network in plaintext |
+| Prompts / answers | direct TCP; answers ECIES-encrypted to you; prompts encrypted when the provider advertises `prompt-enc:ecies` | transport confidentiality varies per provider |
 
-**Security finding (verified in `proxy_sender.go` `decidePromptEncryption`, worth telling Morpheus privately):**
-- When the capability lookup fails, the consumer sends the prompt **unencrypted**. An on-path attacker who
-  breaks `network.capabilities` can downgrade any session to plaintext prompts, and plain TCP gives them that
-  path.
-- The fix is theirs and small: refuse to send unencrypted, or at least never downgrade on a failed lookup.
+**Security note:** shared with Morpheus directly, not in this public document.
 
 **With Delivery for the control plane only (data still direct):**
 
@@ -234,8 +230,8 @@ For Morpheus:
    is no RPC query to log. The chain stays the source of truth for stakes and sessions.
 2. **Private comparison shopping:** ping, capabilities and approval quotes go over Delivery, so the provider
    sees no IP until you choose it. You can probe ten providers and reveal nothing to the nine you don't pick.
-3. **No downgrade:** Delivery carries the ECIES-sealed, signed messages, so the control plane is
-   encrypted end to end by construction. The pitch also fixes the finding above.
+3. **Encrypted by construction:** Delivery carries the ECIES-sealed, signed messages, so the control plane is
+   encrypted end to end for every provider.
 4. **Censorship resistance for the control plane:** there's no fixed endpoint list to block.
 
 **What it does NOT give while the data plane is direct and payment is on-chain:**
