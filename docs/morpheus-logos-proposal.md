@@ -8,6 +8,7 @@ Morpheus already has what a decentralised inference market needs: on-chain provi
 sessions, signed messages and encrypted answers. What it lacks is a **network layer that matches**. Today a
 consumer finds providers through a chain indexer, then connects straight to each provider's public `host:port`
 over plain TCP, which leaves three gaps:
+
 - every provider it merely checks learns its IP;
 - only machines with a public IP can be providers;
 - confidentiality depends on per-provider capabilities.
