@@ -254,3 +254,55 @@ So control-plane Delivery protects browsing, not usage.
 - concrete RLN sizing data for streaming;
 - Basecamp as a first-class Morpheus client (via AI Gateway), and a privacy story ("private AI") that only
   the Logos stack can tell end to end.
+
+## The contracts, and Morpheus on more than one chain (2026-11-26)
+
+**What the contracts do** (`smart-contracts/contracts`, one diamond; ~1,000 lines of facet logic plus ~400
+of storage and ~275 for `ProvidersDelegate`):
+- `ProviderRegistry` (106 lines): register / deregister with a MOR stake, and the `endpoint` string.
+- `ModelRegistry` (103): register models with a stake.
+- `Marketplace` (161): providers post bids (price per second) per model; bid fees.
+- `SessionRouter` (561), the heart:
+  - `openSession` checks a **provider-signed approval** (ECDSA, `ecrecover`), which binds **bid id, chain id,
+    user, timestamp**, so approvals can't be replayed on another chain;
+  - `closeSession` with a provider-signed receipt (disputes put part of the reward on hold);
+  - provider claims; user stake withdrawals.
+- **Two payment modes:**
+  - **direct:** the user's stake pays `pricePerSecond × duration` to the provider;
+  - **stake-for-compute:** the user stakes MOR and gets a daily budget
+    (`stakeToStipend = stake × computeBalance / (totalMORSupply × 100)`). The provider is paid from a
+    **compute pool funded by MOR emissions** (`LinearDistributionIntervalDecrease`). The user's stake comes
+    back (locked until the day's epoch ends).
+- `ProvidersDelegate`: lets MOR holders stake behind a provider and share its rewards.
+
+**Multi-chain today: one chain per deployment, one chain per node.**
+- The node is configured with exactly one `ETH_NODE_CHAIN_ID`, one `ETH_NODE_ADDRESS` (RPC) and one
+  `DIAMOND_CONTRACT_ADDRESS`. Mainnet (Base) and testnet (Base Sepolia) are separate deployments selected by
+  config.
+- Approvals carry the chain id, so the design already expects **parallel deployments, not one cross-chain
+  market**. A provider registers, stakes and bids on each chain separately.
+- A node serving two chains would need to run twice, or gain multi-chain config.
+- All chain access in the node goes through go-ethereum (contract bindings, events, transactions). Any
+  **EVM** chain is a redeploy plus config. A **non-EVM** chain is not.
+
+**Porting to LEZ:**
+- The logic is small and self-contained (registries, bids, sessions, claims, stake-for-compute arithmetic).
+  As LEZ programs (RISC0 guests, Rust) it's a bounded job:
+  - **Signatures:** provider approvals and receipts are secp256k1/ECDSA from Ethereum keys; verifying them in
+    a RISC0 guest is fine (`k256`). LEZ accounts use BIP-340 keys, so a provider has both.
+  - **MOR on LEZ:** a LEZ token, bridged or a test token. The **compute pool funded by emissions** is an
+    economic/governance question for Morpheus (who funds the pool on LEZ?), not a code question. Direct
+    payment mode needs no pool and is the natural first target.
+- **The node is the real work.** It speaks EVM everywhere, so LEZ needs a chain-adapter layer in proxy-router:
+  reads, transactions and events for the same operations. That's a meaningful change on their side, or ours as
+  a fork.
+- **Why LEZ could be worth it, the part transport privacy can't fix:** today `openSession` publicly links the
+  user's wallet to the provider. If LEZ private execution can keep the session's user (and amount) private,
+  that closes the on-chain link, the biggest remaining leak.
+  - **To verify** against LEZ's current privacy model before pitching it; see memory `lez-token-gating-research`.
+
+**Suggested order:**
+1. EVM testnet loop first (Base Sepolia, our own deployment).
+2. A LEZ port of **direct payment only** as a research spike: registries + bids + sessions + the approval
+   check.
+3. A chain-adapter interface proposal for proxy-router, a conversation with Morpheus.
