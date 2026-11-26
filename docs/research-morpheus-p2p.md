@@ -93,7 +93,7 @@ Its parts:
 - **(b) AI Gateway speaks MOR-RPC itself:** a Morpheus P2P connector in `ai_gateway_core` (C++), which would
   need:
   - secp256k1 signing (we have it in WhisperBox and loam);
-  - ECIES (secp256k1 + AES-GCM, the Ethereum-style eciesgo format they use);
+  - ECIES as go-ethereum implements it (`crypto/ecies`: secp256k1, AES-128-CTR + HMAC-SHA256);
   - the message set above;
   - **Arbitrum calls** to discover bids and open/close sessions (an RPC endpoint, an MOR approve, a signed
     `openSession` transaction).
